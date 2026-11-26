@@ -433,8 +433,101 @@ function lastCloseLine(lines: string[], spec: Spec): Map<string, number> {
 
 type Scalar = { above: number } | { content: number };
 
-const NODE =
-  /^(?<indent> *)(?<marks>(?:[-?:][ \t]+)*)(?:(?<key>"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|(?![-?:][ \t])[^\s#'"](?:[^\s:]|:(?=\S)|[ \t]+(?=[^\s#:]))*?)[ \t]*:(?:[ \t]+|(?=\r?$)))?(?:[!&]\S*[ \t]+)*/u;
+// A hand scan, not a regex: on Bun's engine a regex for the plain key slows past about 30 KB of line and gives up past about 160 KB.
+type Node = { marks: string; keyed: boolean; end: number };
+
+function blank(char: string | undefined): boolean {
+  return char === " " || char === "\t";
+}
+
+function space(char: string | undefined): boolean {
+  return char !== undefined && /\s/u.test(char);
+}
+
+function pastBlanks(raw: string, at: number): number {
+  while (blank(raw[at])) at += 1;
+  return at;
+}
+
+function pastColon(raw: string, at: number): number | undefined {
+  const colon = pastBlanks(raw, at);
+  if (raw[colon] !== ":") return undefined;
+
+  const after = colon + 1;
+  if (blank(raw[after])) return pastBlanks(raw, after);
+
+  return after === raw.length || (raw[after] === "\r" && after + 1 === raw.length)
+    ? after
+    : undefined;
+}
+
+function pastDoubleQuoted(raw: string, at: number): number | undefined {
+  let close = at + 1;
+  while (close < raw.length && raw[close] !== '"')
+    if (raw[close] !== "\\") close += 1;
+    else if (close + 1 < raw.length && !/[\n\r\u2028\u2029]/u.test(raw[close + 1]!)) close += 2;
+    else return undefined;
+
+  return close < raw.length ? pastColon(raw, close + 1) : undefined;
+}
+
+function pastSingleQuoted(raw: string, at: number): number | undefined {
+  let close = raw.indexOf("'", at + 1);
+  while (close !== -1 && raw[close + 1] === "'") close = raw.indexOf("'", close + 2);
+  return close === -1 ? undefined : pastColon(raw, close + 1);
+}
+
+function pastPlain(raw: string, at: number): number | undefined {
+  const first = raw[at];
+  if (first === undefined || space(first) || /[#'"]/u.test(first)) return undefined;
+  if (/[-?:]/u.test(first) && blank(raw[at + 1])) return undefined;
+
+  let next = at + 1;
+  for (;;) {
+    const end = pastColon(raw, next);
+    if (end !== undefined) return end;
+
+    const char = raw[next];
+    if (blank(char)) {
+      next = pastBlanks(raw, next);
+      if (next === raw.length || space(raw[next]) || /[#:]/u.test(raw[next]!)) return undefined;
+    } else if (char === undefined || space(char)) return undefined;
+    else if (char === ":" && (next + 1 === raw.length || space(raw[next + 1]))) return undefined;
+    else next += 1;
+  }
+}
+
+function pastKey(raw: string, at: number): number | undefined {
+  if (raw[at] === '"') return pastDoubleQuoted(raw, at);
+  if (raw[at] === "'") return pastSingleQuoted(raw, at);
+  return pastPlain(raw, at);
+}
+
+function pastTags(raw: string, at: number): number {
+  let end = at;
+  while (raw[end] === "!" || raw[end] === "&") {
+    let after = end + 1;
+    while (after < raw.length && !space(raw[after])) after += 1;
+    if (!blank(raw[after])) break;
+
+    end = pastBlanks(raw, after);
+  }
+
+  return end;
+}
+
+function nodeOf(raw: string, depth: number): Node {
+  let marked = depth;
+  while (/[-?:]/u.test(raw[marked] ?? "") && blank(raw[marked + 1]))
+    marked = pastBlanks(raw, marked + 1);
+
+  const keyEnd = pastKey(raw, marked);
+  return {
+    marks: raw.slice(depth, marked),
+    keyed: keyEnd !== undefined,
+    end: pastTags(raw, keyEnd ?? marked),
+  };
+}
 
 const DOCUMENT = /^---(?:[ \t]|\r?$)/u;
 
@@ -458,19 +551,17 @@ function nodeAt(state: State, raw: string): Scalar | undefined {
     return undefined;
   }
 
-  const match = NODE.exec(raw)!;
-  const { marks, key } = match.groups!;
-  const bare = !marks && key === undefined;
-  const parent =
-    key !== undefined
-      ? depth + marks!.length
-      : marks
-        ? depth + marks!.trimEnd().length - 1
-        : awaiting !== undefined && depth > awaiting
-          ? awaiting
-          : undefined;
+  const { marks, keyed, end } = nodeOf(raw, depth);
+  const bare = !marks && !keyed;
+  const parent = keyed
+    ? depth + marks.length
+    : marks
+      ? depth + marks.trimEnd().length - 1
+      : awaiting !== undefined && depth > awaiting
+        ? awaiting
+        : undefined;
 
-  const rest = raw.slice(match[0].length);
+  const rest = raw.slice(end);
   const header = HEADER.exec(rest)?.groups;
   if (header && parent !== undefined) {
     const base = Math.max(parent, 0);
