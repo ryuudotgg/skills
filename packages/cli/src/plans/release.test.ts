@@ -360,6 +360,174 @@ describe("plans release", () => {
     await expectKept(tree, "ignored .venv/ is not disposable");
   });
 
+  async function listedIgnored(tree: Tree): Promise<string[]> {
+    const args = ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory"];
+    return (await fixtureGit(tree.holder, args)).split("\n").filter(Boolean);
+  }
+
+  async function removedWorkspace(tree: Tree): Promise<void> {
+    await track(tree, "apps/web/package.json");
+    await writeFixture(tree.holder, "apps/gone/node_modules/pkg/index.js", "\n");
+  }
+
+  async function wrangler(tree: Tree): Promise<void> {
+    await writeFixture(tree.repo, ".git/info/exclude", ".wrangler/\n*.log\n");
+    await mkdir(join(tree.holder, ".wrangler/tmp"), { recursive: true });
+  }
+
+  test.each([
+    ["a removed workspace keeping only its node_modules", "apps/gone/", removedWorkspace],
+    ["a .wrangler holding only an empty tmp", ".wrangler/", wrangler],
+    [
+      "a .wrangler whose tmp holds a node_modules with an env example",
+      ".wrangler/",
+      async (tree: Tree) => {
+        await wrangler(tree);
+        await writeFixture(tree.holder, ".wrangler/tmp/node_modules/pkg/.env.example", "A=1\n");
+      },
+    ],
+    [
+      "a .wrangler whose tmp holds a file",
+      ".wrangler/",
+      async (tree: Tree) => {
+        await wrangler(tree);
+        await writeFixture(tree.holder, ".wrangler/tmp/bundle/index.js", "\n");
+      },
+    ],
+  ])("releases %s", async (_name, folder, setup) => {
+    const tree = await createTree();
+    await setup(tree);
+    expect(await listedIgnored(tree)).toContain(folder);
+
+    const result = await release(tree);
+    expect([result.code, result.stderr]).toEqual([0, ""]);
+    expect(result.stdout).toBe(`released 1 ${tree.holder}\nreleased 1 of 1\n`);
+    expect(await worktreeList(tree)).not.toContain(tree.holder);
+    expect(existsSync(tree.holder)).toBe(false);
+  });
+
+  test.each([
+    [
+      "a file beside a removed workspace's node_modules",
+      "apps/gone/",
+      async (tree: Tree) => {
+        await removedWorkspace(tree);
+        await writeFixture(tree.repo, ".git/info/exclude", "*.log\n");
+        await writeFixture(tree.holder, "apps/gone/debug.log", "\n");
+      },
+    ],
+    [
+      "a symlink with a disposable name",
+      ".wrangler/",
+      async (tree: Tree) => {
+        await wrangler(tree);
+        await rename(join(tree.holder, ".wrangler/tmp"), join(tree.directory, "elsewhere"));
+        await symlink(join(tree.directory, "elsewhere"), join(tree.holder, ".wrangler/tmp"));
+      },
+    ],
+    [
+      "an env file in a nested dist",
+      "apps/gone/",
+      async (tree: Tree) => {
+        await track(tree, "apps/web/package.json");
+        await writeFixture(tree.holder, "apps/gone/dist/.env.local", "SECRET=1\n");
+      },
+    ],
+    [
+      "local data under .wrangler/state",
+      ".wrangler/",
+      async (tree: Tree) => {
+        await wrangler(tree);
+        await writeFixture(tree.holder, ".wrangler/state/v3/d1/db.sqlite", "\n");
+      },
+    ],
+    [
+      "a symlink under its disposable tmp",
+      ".wrangler/",
+      async (tree: Tree) => {
+        await wrangler(tree);
+        await symlink(tree.directory, join(tree.holder, ".wrangler/tmp/link"));
+      },
+    ],
+    [
+      "an empty folder named like an env file",
+      ".wrangler/",
+      async (tree: Tree) => {
+        await wrangler(tree);
+        await mkdir(join(tree.holder, ".wrangler/.env.local"));
+      },
+    ],
+  ])("holds a walked folder with %s", async (_name, entry, setup) => {
+    const tree = await createTree();
+    await setup(tree);
+    await expectKept(tree, `ignored ${entry} is not disposable`);
+  });
+
+  test("holds a listed symlink whose name is disposable", async () => {
+    const tree = await createTree();
+    await writeFixture(tree.holder, ".wrangler/.gitignore", "tmp\n");
+    await commitFixture(tree.holder);
+    await pr(tree, "feat/a", (await fixtureGit(tree.holder, ["rev-parse", "HEAD"])).trim());
+
+    await symlink(tree.directory, join(tree.holder, ".wrangler/tmp"));
+    expect(await listedIgnored(tree)).toContain(".wrangler/tmp");
+    await expectKept(tree, "ignored .wrangler/tmp is not disposable");
+  });
+
+  test.each([
+    ["an ignored file", "debug.log", "debug.log"],
+    ["an env file in dist", "dist/.env.local", "dist/.env.local"],
+  ])("names %s, not a disposable walked folder listed first", async (_name, file, entry) => {
+    const tree = await createTree();
+    await wrangler(tree);
+    await writeFixture(tree.holder, file, "\n");
+    await expectKept(tree, `ignored ${entry} is not disposable`);
+  });
+
+  test.each([
+    ["turns from a folder into a file", "rmdir .wrangler/tmp && touch .wrangler/tmp"],
+    ["renames an entry under a disposable folder", "mv .wrangler/tmp/a .wrangler/tmp/b"],
+  ])("holds a walked folder that %s between reads", async (_name, change) => {
+    const tree = await createTree();
+    await wrangler(tree);
+    if (change.startsWith("mv")) await writeFixture(tree.holder, ".wrangler/tmp/a", "\n");
+
+    const bin = join(tree.directory, "bin");
+    const count = join(tree.directory, "lsof-calls");
+    await writeFixture(
+      bin,
+      "lsof",
+      `#!/bin/sh\necho x >> '${count}'\nif [ "$(wc -l < '${count}')" -gt 1 ]; then cd '${tree.holder}' && ${change} || exit 1; fi\nprintf 'p1\\nn/\\n'\n`,
+    );
+
+    await chmod(join(bin, "lsof"), 0o755);
+    tree.env.PATH = `${bin}:${tree.env.PATH}`;
+    await expectKept(tree, "changed since the first read");
+  });
+
+  test.skipIf(process.getuid?.() === 0)(
+    "holds a walked folder it cannot read as a failed read",
+    async () => {
+      const tree = await createTree();
+      await wrangler(tree);
+      await writeFixture(tree.holder, ".wrangler/state/v3/db.sqlite", "\n");
+
+      const locked = join(tree.holder, ".wrangler/state");
+      await chmod(locked, 0o000);
+
+      try {
+        const before = await worktreeList(tree);
+        const result = await release(tree);
+
+        expect(result.code).toBe(1);
+        expect(result.stdout).toStartWith(`kept 1 ${tree.holder}: EACCES`);
+        expect(await worktreeList(tree)).toBe(before);
+      } finally {
+        await chmod(locked, 0o755);
+      }
+    },
+  );
+
   test("holds an env file inside husky's generated hooks", async () => {
     const tree = await createTree();
     await track(tree, ".husky/pre-commit");
