@@ -1002,15 +1002,24 @@ type Parallel = {
   fileSep: string;
   columns?: RegExp | "csv";
   delimiter?: string;
-  group?: number;
+  group?: { size: number; exact: boolean };
+  shifted?: boolean;
 };
 
 const fromFile = (parallel: Parallel, file: string) =>
   parallel.sources.push(file === "-" || STDIN_PATHS.has(file) ? "stdin" : "file");
 
 const literally = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const grouping = (parallel: Parallel, value: string) => (parallel.group = count(value));
-const packing = (parallel: Parallel) => (parallel.group = Infinity);
+const exactly = (parallel: Parallel, value: string) =>
+  (parallel.group = { size: count(value), exact: true });
+
+const grouping = (parallel: Parallel, value: string) =>
+  parallel.group?.exact || (parallel.group = { size: count(value), exact: false });
+
+const packing = (parallel: Parallel) =>
+  parallel.group?.exact || (parallel.group = { size: Infinity, exact: false });
+
+const shifting = (parallel: Parallel) => (parallel.shifted = true);
 const splitting = (parallel: Parallel, value: string) => {
   try {
     parallel.columns = new RegExp(value);
@@ -1048,8 +1057,13 @@ const PARALLEL_EFFECTS: Record<string, (parallel: Parallel, value: string) => vo
   "--parens": (parallel) => (parallel.rules = "custom"),
   "--header": (parallel) => (parallel.rules = "custom"),
   "--match": (parallel) => (parallel.rules = "custom"),
-  "-0": (parallel) => (parallel.delimiter = "\0"),
-  "--null": (parallel) => (parallel.delimiter = "\0"),
+  "-0": (parallel) => (parallel.delimiter ??= "\0"),
+  "--null": (parallel) => (parallel.delimiter ??= "\0"),
+  "-s": shifting,
+  "--max-chars": shifting,
+  "--maxchars": shifting,
+  "--skip-first-line": shifting,
+  "--skipfirstline": shifting,
   "-d": (parallel, value) => (parallel.delimiter = ansiC(value)),
   "--delimiter": (parallel, value) => (parallel.delimiter = ansiC(value)),
   "-C": splitting,
@@ -1059,15 +1073,15 @@ const PARALLEL_EFFECTS: Record<string, (parallel: Parallel, value: string) => vo
   "-L": grouping,
   "-l": grouping,
   "-m": packing,
-  "-N": grouping,
+  "-N": exactly,
   "-n": grouping,
   "-X": packing,
   "--max-args": grouping,
   "--max-lines": grouping,
-  "--max-replace-args": grouping,
+  "--max-replace-args": exactly,
   "--maxargs": grouping,
   "--maxlines": grouping,
-  "--maxreplaceargs": grouping,
+  "--maxreplaceargs": exactly,
   "--xargs": packing,
 };
 
@@ -1132,7 +1146,7 @@ function csvFields(input: string): string[] {
 }
 
 function records(text: string, delimiter: string | undefined): string[] {
-  const found = text.split("\n").flatMap((line) => (delimiter ? line.split(delimiter) : [line]));
+  const found = text.split(delimiter ?? "\n");
   return found.at(-1) === "" ? found.slice(0, -1) : found;
 }
 
@@ -1196,10 +1210,11 @@ function parallelJobs(parallel: Parallel, texts: string[], budget: Budget): stri
 
     const tuples = product(sources);
     const flat = parallel.group ? tuples.flat() : [];
+    const width = (parallel.group?.size ?? 1) * sources.length;
     const groups =
-      parallel.group === Infinity
-        ? flat.map((_, from) => flat.slice(from))
-        : chunks(flat, (parallel.group ?? 1) * sources.length);
+      parallel.group?.exact && !parallel.shifted
+        ? chunks(flat, width)
+        : flat.map((_, from) => flat.slice(from, from + width));
 
     const jobs = [...tuples, ...groups]
       .map(columns)

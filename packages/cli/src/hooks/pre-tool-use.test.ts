@@ -1378,6 +1378,13 @@ describe("CommitGuard", () => {
         [`parallel git ::: ${many} ::: ${many}`, "too many commands to judge"],
         [`parallel sh -c ::: "${inner("a")}" "${inner("b")}"`, "nested command"],
         ["parallel --tag git ::: push", "git push [-u] [-q] origin <branch>"],
+        [
+          "printf 'x\\nx\\0z\\0.\\0push\\0' | parallel -0 -N2 git -C",
+          "git push [-u] [-q] origin <branch>",
+        ],
+        ["parallel -s 99 -N2 git -C ::: x y . push", "git push [-u] [-q] origin <branch>"],
+        ["parallel -N2 -n1 git '{2}' ::: x push", "git push [-u] [-q] origin <branch>"],
+        ["printf ',push' | parallel -d , -0 -N2 git '{2}'", "git push [-u] [-q] origin <branch>"],
         ["parallel git '{1:%.4s}' ::: push-extra", "replacement string could not be read"],
         ["parallel --match 'x(.*)' git '{1.1}' ::: xpush", "replacement string could not be read"],
         ["parallel --rpl 'V $_=1' V push ::: x", "replacement string could not be read"],
