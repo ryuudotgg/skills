@@ -300,8 +300,11 @@ async function inspectOnce({ id, worktree }: Candidate, reads: Reads): Promise<I
     for (const seen of contents) walked.push(seen);
   }
 
-  for (const entry of ignored.filter((name) => name.endsWith("/") && disposable(name, names))) {
-    const nested = envInside(path, entry);
+  for (const entry of ignored.filter((name) => disposable(name, names))) {
+    const stat = lstatSync(join(path, entry.replace(/\/$/, "")));
+    if (!stat.isFile() && !stat.isDirectory()) return kept(`ignored ${entry} is not disposable`);
+
+    const nested = entry.endsWith("/") ? envInside(path, entry) : undefined;
     if (nested) return kept(`ignored ${nested} is not disposable`);
   }
 

@@ -463,6 +463,17 @@ describe("plans release", () => {
     await expectKept(tree, `ignored ${entry} is not disposable`);
   });
 
+  test("holds a listed symlink whose name is disposable", async () => {
+    const tree = await createTree();
+    await writeFixture(tree.holder, ".wrangler/.gitignore", "tmp\n");
+    await commitFixture(tree.holder);
+    await pr(tree, "feat/a", (await fixtureGit(tree.holder, ["rev-parse", "HEAD"])).trim());
+
+    await symlink(tree.directory, join(tree.holder, ".wrangler/tmp"));
+    expect(await listedIgnored(tree)).toContain(".wrangler/tmp");
+    await expectKept(tree, "ignored .wrangler/tmp is not disposable");
+  });
+
   test.each([
     ["an ignored file", "debug.log", "debug.log"],
     ["an env file in dist", "dist/.env.local", "dist/.env.local"],
