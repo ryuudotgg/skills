@@ -1378,6 +1378,7 @@ describe("CommitGuard", () => {
         [`parallel git ::: ${many} ::: ${many}`, "too many commands to judge"],
         [`parallel sh -c ::: "${inner("a")}" "${inner("b")}"`, "nested command"],
         ["parallel --tag git ::: push", "git push [-u] [-q] origin <branch>"],
+        ["printf push | parallel -d '' git", "git push [-u] [-q] origin <branch>"],
         [
           "printf 'x\\nx\\0z\\0.\\0push\\0' | parallel -0 -N2 git -C",
           "git push [-u] [-q] origin <branch>",

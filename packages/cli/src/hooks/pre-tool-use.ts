@@ -1146,7 +1146,7 @@ function csvFields(input: string): string[] {
 }
 
 function records(text: string, delimiter: string | undefined): string[] {
-  const found = text.split(delimiter ?? "\n");
+  const found = text.split(delimiter || "\n");
   return found.at(-1) === "" ? found.slice(0, -1) : found;
 }
 
