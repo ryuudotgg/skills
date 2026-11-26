@@ -1146,7 +1146,7 @@ function csvFields(input: string): string[] {
 }
 
 function records(text: string, delimiter: string | undefined): string[] {
-  const found = text.split(delimiter || "\n");
+  const found = text.split(delimiter ?? "\n");
   return found.at(-1) === "" ? found.slice(0, -1) : found;
 }
 
@@ -1161,6 +1161,9 @@ function parallelJobs(parallel: Parallel, texts: string[], budget: Budget): stri
       [...line.matchAll(/\{[^{}]*\}/g)].some(([found]) => !SLOT.test(found)))
   )
     throw new Unjudged("parallel replacement string could not be read");
+
+  if (parallel.delimiter === "")
+    throw new Unjudged("an empty parallel delimiter could not be read");
 
   const custom = [...parallel.slots.keys()].map(literally);
   const pattern = new RegExp([...custom, SLOTS.source].join("|"), "g");
