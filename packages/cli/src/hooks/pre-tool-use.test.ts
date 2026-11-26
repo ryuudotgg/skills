@@ -934,6 +934,23 @@ describe("CommitGuard", () => {
     }
   });
 
+  test("test_locale_quoted_subcommands_are_judged", async () => {
+    const repo = await pushRepo();
+    for (const contents of ["DELIVERY=prs\n", "DELIVERY=hands-off\n"]) {
+      for (const command of ['git $"push" --force origin main', 'git $"p"ush origin main'])
+        expect(reason(await guard(command, contents, undefined, repo))).toContain(
+          "git push [-u] [-q] origin <branch>",
+        );
+
+      expect(
+        reason(await guard('git $"commit" --amend --no-edit', contents, undefined, repo)),
+      ).toContain("git commit -m");
+
+      for (const command of ['git $"status"', "rg '$\"push\"' README.md"])
+        expect(await guard(command, contents, undefined, repo)).toBeNull();
+    }
+  });
+
   test("test_substitutions_that_do_not_push_pass", async () => {
     const repo = await pushRepo();
     for (const command of [
@@ -1139,6 +1156,17 @@ describe("CommitGuard", () => {
         ['true | (printf "git push" | bash)', "git push [-u] [-q]"],
         ['rg x | head; echo "git push" | (true; bash)', "git push [-u] [-q]"],
         ['echo "git push" | case a in a) bash;; esac', "git push [-u] [-q]"],
+        ["printf g$'it push --force origin main' | sh", "git push [-u] [-q]"],
+        ["sh <<< g$'it'\\ push", "git push [-u] [-q]"],
+        ["printf g$'it push --force origin main' | b$'ash'", "git push [-u] [-q]"],
+        ["printf '%s%s\\n' g$'i' 't push --force origin main' | sh", "git push [-u] [-q]"],
+        ["command printf '%s%s\\n' gi 't push --force origin main' | sh", "git push [-u] [-q]"],
+        ["printf '%.*s%s\\n' 2 gix 't push --force origin main' | sh", "git push [-u] [-q]"],
+        ["printf '%.*s%s\\n' +2 gix 't push' | sh", "git push [-u] [-q]"],
+        ["printf '%.*b%s\\n' 2 '\\0147\\0151x' 't push' | sh", "git push [-u] [-q]"],
+        [`printf g$'it push' | $${"\\\n".repeat(63)}"bash"`, "git push [-u] [-q]"],
+        ["printf g$'it push --force origin main' | $\\\n\"bash\"", "git push [-u] [-q]"],
+        ["printf '%s' g$'it commit --amend' | bash", "nested command"],
         [
           'sh -c "git push"; sh -c "git config skills.greptile.rereviews 9"',
           "skills.* holds the operator's reviewer settings",
@@ -1167,6 +1195,10 @@ describe("CommitGuard", () => {
         'rg "git push" docs | rg bash',
         'echo "git push"; (true; bash)',
         'rg "git push" docs | head; (true; bash build.sh)',
+        "printf g$'it push' > notes.txt",
+        'echo "git push" # | sh',
+        "printf 'git push' # | sh\nsh -c ':'",
+        "printf 'git push'; printf '# %s\\n' ')' | sh",
       ])
         expect(await guard(command, contents)).toBeNull();
     }

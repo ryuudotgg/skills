@@ -26,6 +26,7 @@ const SETTING_REASON =
 const UNREADABLE = `Blocked: the payload was unreadable, so commits and PR comments stay blocked. Allowed shapes: ${BOTH_SHAPES}.`;
 const PUNCTUATION = new Set(";|&()<>");
 const ANSI_C_WORD = /\0*'((?:[^\\']|\\[^])*)(')?/y;
+const LOCALE_QUOTE = /\0*"/y;
 const ANSI_C_ESCAPE =
   /\\(?:([0-7]{1,3})|x([0-9a-fA-F]{1,2})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8})|(C-)|(c[ @`])|([^]))|[^]/g;
 
@@ -271,7 +272,7 @@ function joined(raw: string): string {
 
 class ShellsDisagree extends Error {}
 
-function tokens(raw: string, newlines = false, literal = false): string[] {
+function tokens(raw: string, newlines = false, literal = false, decode = !literal): string[] {
   const text = (
     literal ? raw.replace(CONTINUATION, (_, pairs: string) => pairs + "\0") : joined(raw)
   ).replace(/`|\$\(/g, (match) => (literal && match !== "`" ? " ;( " : " ; "));
@@ -312,6 +313,9 @@ function tokens(raw: string, newlines = false, literal = false): string[] {
       state = "space";
     }
 
+    // Bash runs $"..." as the quoted text when no translation exists, zsh as $ and a quoted word.
+    if (decode && char === "$" && localeAt(text, index + 1)) continue;
+
     const quoted = char === "$" ? ansiCWord(text, index + 1) : null;
     if (literal && state === "space" && char === "#") {
       const end = text.slice(index).search(/[\n\0]/);
@@ -328,7 +332,8 @@ function tokens(raw: string, newlines = false, literal = false): string[] {
     } else if (quoted) {
       if (quoted[2] === undefined) throw new Error("No closing quotation");
 
-      const decoded = literal ? "$" + quoted[1]!.replaceAll("\0", "") : ansiC(quoted[1]!);
+      const body = quoted[1]!.replaceAll("\0", "");
+      const decoded = decode ? ansiC(body) : "$" + body;
       const nul = decoded.indexOf("\0");
       if (nul >= 0 && cut < 0) cut = token.length + nul;
 
@@ -353,6 +358,11 @@ function tokens(raw: string, newlines = false, literal = false): string[] {
   else if (state === "punctuation") parts.push(token);
 
   return parts;
+}
+
+function localeAt(text: string, at: number): boolean {
+  LOCALE_QUOTE.lastIndex = at;
+  return LOCALE_QUOTE.test(text);
 }
 
 function ansiCWord(text: string, at: number): RegExpExecArray | null {
@@ -508,12 +518,21 @@ function shellStdin(parts: string[]): string[][] {
     const producers = [...fed.flatMap(piped), ...piped(at)];
     if (producers.length === 0) return [own];
 
-    const output = producers.flatMap((words) =>
-      words.slice(words.findIndex((word) => !KEYWORDS.has(word)) + 1),
+    const commands = producers.map((words) =>
+      words.slice(words.findIndex((word) => !KEYWORDS.has(word))),
     );
 
-    const printed = output.join(" ");
-    return [[...producers.flat(), ...own, printed, unescaped(printed), ansiC(printed)]];
+    const output = commands.flatMap((words) => words.slice(1));
+    const formats = commands.flatMap((words) => printed(words.slice(runs(words))));
+
+    const words = [...producers.flat(), ...own];
+    const texts = [output.join(" "), ...formats].flatMap((text) => [
+      text,
+      unescaped(text),
+      ansiC(text),
+    ]);
+
+    return [[...words, ...new Set(texts.filter((text) => !words.includes(text)))]];
   });
 }
 
@@ -731,11 +750,13 @@ function formatted(format: string, args: string[]): string {
         if (directive === "%%") return "%";
 
         next += directive.split("*").length - 1;
-        const arg = args[next++] ?? "";
-        if (conversion === "c") return arg.slice(0, 1);
+        const limit = precision === "*" ? (args[next - 1] ?? "") : precision;
+        const given = args[next++] ?? "";
+        if (conversion === "c") return given.slice(0, 1);
 
-        return precision && precision !== "*" && "sb".includes(conversion!)
-          ? arg.slice(0, Number(precision))
+        const arg = conversion === "b" ? unescaped(given) : given;
+        return limit && /^\s*\+?\d+$/.test(limit) && "sb".includes(conversion!)
+          ? arg.slice(0, Number(limit))
           : arg;
       },
     );
@@ -1570,8 +1591,15 @@ export function classify(raw: string): Result {
 
   const expressions = patterns(raw);
 
-  for (const segment of [...groups.filter(nests), ...shellStdin(tokens(raw, true, true))]) {
-    const nested = [...segment, segment.join(" ")].map((part) =>
+  const fed = [true, false].flatMap((decode) => shellStdin(tokens(raw, true, true, decode)));
+  const judged = new Set<string>();
+  for (const segment of [...groups.filter(nests), ...fed]) {
+    const key = segment.join("\0");
+    if (judged.has(key)) continue;
+
+    judged.add(key);
+
+    const nested = [...new Set([...segment, segment.join(" ")])].map((part) =>
       part === raw ? "PASS" : classify(part).kind,
     );
 
