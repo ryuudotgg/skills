@@ -157,6 +157,59 @@ const XARGS_LONG_VALUES = new Set([
   "--process-slot-var",
 ]);
 
+const PARALLELS = new Set(["parallel", "env_parallel"]);
+const PARALLEL_VALUES = new Set("aBCdDEHIjJLnNPsSUW");
+const PARALLEL_LONG_VALUES = new Set(
+  `arg-file argfile arg-file-sep argfilesep arg-sep argsep basefile bf basenameextensionreplace
+  bner basenamereplace bnr bin block block-size blocksize block-timeout blocktimeout bt col-sep
+  colsep combine-exec combine-executable combineexec combineexecutable compress-program
+  compressprogram ctag-string ctagstring debug decompress-program decompressprogram delay
+  delimiter dirnamereplace dnr env extensionreplace er filter group-by groupby halt
+  halt-on-error haltonerror header id jl joblog jobs limit linkinputsource xapplyinputsource load match max-args
+  max-chars max-procs max-replace-args maxargs maxchars maxprocs maxreplaceargs memfree
+  memsuspend milestone min-version minversion ms nice parens process-slot-var processslotvar
+  profile recend recstart res result results retries return rpl rsync-opts rsyncopts
+  semaphore-name semaphore-timeout semaphorename semaphoretimeout seqreplace shard
+  shell-completion shellcompletion slf slotreplace sql sql-and-worker sql-master sql-worker
+  sqlandworker sqlmaster sqlworker ssh ssh-delay sshdelay sshlogin sshloginfile st tag-string
+  tagstring template tempdir term-seq termseq tf timeout tmpdir tmpl total total-jobs totaljobs
+  transfer-file transfer-files transferfile transferfiles trc trim use-compress-program
+  use-decompress-program usecompressprogram usedecompressprogram wd work-dir workdir`
+    .split(/\s+/)
+    .map((name) => "--" + name),
+);
+
+const PARALLEL_LONG = [
+  ...PARALLEL_LONG_VALUES,
+  ...`bar bg bibtex cat cf citation cleanup color color-fail color-failed colorfail colorfailed
+  colour colour-fail colour-failed colourfail colourfailed compress controlmaster csv ctag
+  ctrl-c ctrlc dr dry-run dryrun embed eof eta exit fast fg fifo files files0 filter-host
+  filter-hosts filterhosts gnu group hashbang help hgrp hostgroup hostgroups hostgrp interactive
+  keep-order keeporder latest-line latestline lb line-buffer line-buffered linebuffer
+  linebuffered link ll max-line-length-allowed max-lines maxlinelengthallowed maxlines nn
+  no-ctrl-c no-ctrlc no-k no-keep-order no-notice no-run-if-empty noctrlc nok nokeeporder
+  nonall nonotice norunifempty noswap null number-of-cores number-of-cpus number-of-sockets
+  number-of-threads numberofcores numberofcpus numberofsockets numberofthreads onall open-tty
+  output-as-files output-as-files0 outputasfiles outputasfiles0 pipe pipe-part pipepart plus
+  progress quote record-env recordenv regex regexp remove-rec-sep removerecsep replace resume
+  resume-failed resumefailed retry-failed retryfailed round round-robin roundrobin rrs
+  semaphore shebang shell-quote shellquote show-limits showlimits shuf silent skip-first-line
+  skipfirstline spreadstdin tag tee tmux tmux-pane tmuxpane tollef transfer tty ungroup unsafe
+  use-cores-instead-of-threads use-cpus-instead-of-cores use-sockets-instead-of-threads
+  usecoresinsteadofthreads usecpusinsteadofcores usesocketsinsteadofthreads verbose version
+  wait will-cite willcite xapply xargs`
+    .split(/\s+/)
+    .map((name) => "--" + name),
+];
+
+const SLOT = /^\{(-?\d*)(\/\/|\/\.|\/|\.|#|%)?\}$/;
+const SLOTS = /\{-?\d*(?:\/\/|\/\.|\/|\.|#|%)?\}/g;
+
+const JOB_BUDGET = 1024;
+const TOO_MANY = "the command builds too many commands to judge";
+const JOINERS = new Set([";", "&&", "||", "&"]);
+const PRINTERS = new Set(["echo", "printf"]);
+
 const UNSURE = /[$*?[{]/;
 const STDIN_PATHS = new Set(["/dev/stdin", "/dev/fd/0"]);
 
@@ -271,21 +324,34 @@ function joined(raw: string): string {
 }
 
 class ShellsDisagree extends Error {}
+class Unjudged extends Error {}
 
-function tokens(raw: string, newlines = false, literal = false, decode = !literal): string[] {
+const DESCRIPTOR = "\0";
+const DESCRIPTOR_WORD = /^(?:[0-9]+|\{[A-Za-z_][A-Za-z0-9_]*\})$/;
+function tokens(
+  raw: string,
+  newlines = false,
+  literal = false,
+  decode = !literal,
+  descriptors = false,
+): string[] {
   const text = (
     literal ? raw.replace(CONTINUATION, (_, pairs: string) => pairs + "\0") : joined(raw)
   ).replace(/`|\$\(/g, (match) => (literal && match !== "`" ? " ;( " : " ; "));
 
   const parts: string[] = [];
   let cut = -1;
-  const word = () => {
+  const word = (descriptor = false) => {
     if (cut >= 0 && token.length > cut) throw new ShellsDisagree("Shells disagree after a NUL");
+
     cut = -1;
-    parts.push(literal && isPunctuation(token) ? "\\" + token : token);
+    parts.push(
+      descriptor ? DESCRIPTOR + token : literal && isPunctuation(token) ? "\\" + token : token,
+    );
   };
 
   let token = "";
+  let begin = 0;
   let state: "space" | "word" | "punctuation" | "'" | '"' = "space";
   for (let index = 0; index < text.length; index++) {
     const char = text[index]!;
@@ -313,6 +379,7 @@ function tokens(raw: string, newlines = false, literal = false, decode = !litera
       state = "space";
     }
 
+    if (state === "space") begin = index;
     // Bash runs $"..." as the quoted text when no translation exists, zsh as $ and a quoted word.
     if (decode && char === "$" && localeAt(text, index + 1)) continue;
 
@@ -326,7 +393,14 @@ function tokens(raw: string, newlines = false, literal = false, decode = !litera
       token = "";
       state = "space";
     } else if (PUNCTUATION.has(char)) {
-      if (state === "word") word();
+      // Only an unquoted number or {name} touching the redirect is its descriptor, so read the raw spelling.
+      if (state === "word")
+        word(
+          descriptors &&
+            ("<>".includes(char) || (char === "&" && text[index + 1] === ">")) &&
+            DESCRIPTOR_WORD.test(text.slice(begin, index).replaceAll("\0", "")),
+        );
+
       token = char;
       state = "punctuation";
     } else if (quoted) {
@@ -576,13 +650,12 @@ const XARGS_EFFECTS: Record<string, (xargs: Xargs, value: string) => void> = {
 };
 
 const WRAPPERS = new Set([...BUILTIN_WRAPPERS, "exec", "nohup"]);
-const DESCRIPTOR = "\0";
 const BODY_ROWS = 3;
 function runs(words: string[], start = 0): number {
   let at = start;
   while (at < words.length) {
     const word = words[at]!;
-    if (LEADING.has(word) || ASSIGNING.test(word) || word.startsWith(DESCRIPTOR)) at++;
+    if (LEADING.has(word) || ASSIGNING.test(word)) at++;
     else if (basename(word) === "env") at = envCommand(words, at, new Map());
     else if (WRAPPERS.has(basename(word))) {
       const values = basename(word) === "exec" ? "a" : "";
@@ -599,29 +672,52 @@ function runs(words: string[], start = 0): number {
   return at;
 }
 
-function xargsRunsGit(words: string[]): Xargs[] {
-  const xargs: Xargs = { command: [], file: false, chars: false };
-  const apply = (name: string, value: string) => XARGS_EFFECTS[name]?.(xargs, value);
+type Grammar = {
+  values: Set<string>;
+  optional: Record<string, RegExp | undefined>;
+  long: string[];
+  longValues: Set<string>;
+};
 
+const XARGS_GRAMMAR: Grammar = {
+  values: XARGS_VALUES,
+  optional: Object.fromEntries([...XARGS_OPTIONAL].map((flag) => ["-" + flag, undefined])),
+  long: XARGS_LONG,
+  longValues: XARGS_LONG_VALUES,
+};
+
+const PARALLEL_GRAMMAR: Grammar = {
+  values: PARALLEL_VALUES,
+  optional: {
+    "-e": /^(?!-)/,
+    "-i": /^(?!-)/,
+    "-l": /^[\d.]+$/,
+    "--eof": /^(?!-)/,
+    "--replace": /^(?!-)/,
+    "--max-lines": /^[\d.]+$/,
+    "--maxlines": /^[\d.]+$/,
+  },
+  long: PARALLEL_LONG,
+  longValues: PARALLEL_LONG_VALUES,
+};
+
+function scan(words: string[], grammar: Grammar, apply: (name: string, value: string) => void) {
   let index = 0;
-  const operand = () => (words[++index] ?? "").replace(DESCRIPTOR, "");
+  const operand = () => words[++index] ?? "";
+  const optional = (name: string) =>
+    grammar.optional[name]?.test(words[index + 1] ?? "") ? operand() : "";
+
   for (; index < words.length; index++) {
     const word = words[index]!;
-    if (word.startsWith(DESCRIPTOR)) continue;
-
-    if (word === "--") {
-      index++;
-      break;
-    }
+    if (word === "--") return index + 1;
 
     if (word.startsWith("--")) {
       const [spelled = "", value] = word.split(/=(.*)/s);
-      const name = XARGS_LONG.includes(spelled)
+      const name = grammar.long.includes(spelled)
         ? spelled
-        : (XARGS_LONG.find((option) => option.startsWith(spelled)) ?? spelled);
+        : (grammar.long.find((option) => option.startsWith(spelled)) ?? spelled);
 
-      const needs = XARGS_LONG_VALUES.has(name) && value === undefined;
-      apply(name, needs ? operand() : (value ?? ""));
+      apply(name, value ?? (grammar.longValues.has(name) ? operand() : optional(name)));
       continue;
     }
 
@@ -630,13 +726,13 @@ function xargsRunsGit(words: string[]): Xargs[] {
     for (let at = 1; at < word.length; at++) {
       const flag = word[at]!;
       const attached = word.slice(at + 1);
-      if (XARGS_VALUES.has(flag)) {
+      if (grammar.values.has(flag)) {
         apply("-" + flag, attached || operand());
         break;
       }
 
-      if (XARGS_OPTIONAL.has(flag)) {
-        apply("-" + flag, attached);
+      if ("-" + flag in grammar.optional) {
+        apply("-" + flag, attached || optional("-" + flag));
         break;
       }
 
@@ -644,19 +740,15 @@ function xargsRunsGit(words: string[]): Xargs[] {
     }
   }
 
-  const tail = words.slice(runs(words, index));
-  const readings = new Map(
-    [
-      tail.filter((word) => !word.startsWith(DESCRIPTOR)),
-      tail.map((word) => word.replace(DESCRIPTOR, "")),
-    ].map((command) => [command.join("\0"), command]),
-  );
+  return index;
+}
 
-  return xargs.file
-    ? []
-    : [...readings.values()]
-        .filter((command) => basename(command[0] ?? "") === "git")
-        .map((command) => ({ ...xargs, command }));
+function xargsRuns(words: string[]): Xargs | undefined {
+  const xargs: Xargs = { command: [], file: false, chars: false };
+  const start = scan(words, XARGS_GRAMMAR, (name, value) => XARGS_EFFECTS[name]?.(xargs, value));
+  const command = words.slice(runs(words, start));
+  const head = basename(command[0] ?? "");
+  return xargs.file || (head !== "git" && !PARALLELS.has(head)) ? undefined : { ...xargs, command };
 }
 
 function chunks<T>(items: T[], size: number): T[][] {
@@ -733,7 +825,8 @@ function printed(words: string[]): string[] {
   if (name !== "printf") return [];
 
   const format = rest[0] === "--" ? 1 : 0;
-  if (!/%/.test((rest[format] ?? "").replaceAll("%%", ""))) return [rest.slice(format).join(" ")];
+  if (!/%/.test((rest[format] ?? "").replaceAll("%%", "")))
+    return [rest[format] ?? "", rest.slice(format).join(" ")];
 
   const args = rest.slice(format + 1);
   return [formatted(rest[format]!, args), args.join(" "), args.join("\n")];
@@ -765,11 +858,11 @@ function formatted(format: string, args: string[]): string {
   }
 }
 
-function bodies(rows: string[][], xargs: Xargs): string[] {
+function bodies(rows: string[][], command: string[]): string[] {
   const flat = rows.flat();
   const rowOf = rows.flatMap((row, number) => row.map(() => number));
-  const typed = subcommandAt(xargs.command, 0) >= 0;
-  const pending = GIT_VALUE_OPTIONS.has(xargs.command.at(-1) ?? "") ? 0 : 1;
+  const typed = subcommandAt(command, 0) >= 0;
+  const pending = GIT_VALUE_OPTIONS.has(command.at(-1) ?? "") ? 0 : 1;
 
   let offset = 0;
   const reaches = rows.map((row) => {
@@ -796,43 +889,358 @@ function quoted(word: string): string {
   return /^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`;
 }
 
-function xargsGit(parts: string[]): string[] {
-  const { commands, separators } = pipeline(parts);
+function own(command: string[]): string[] {
+  const words = command.flatMap((part, index) => {
+    if (
+      isPunctuation(part) ||
+      part.startsWith(DESCRIPTOR) ||
+      REDIRECT.test(command[index - 1] ?? "")
+    )
+      return [];
 
-  // A number before a redirect is its descriptor only when no space parts them, which tokens lose.
-  const own = (command: string[]) => {
-    const words = command.flatMap((part, index) => {
-      if (isPunctuation(part) || REDIRECT.test(command[index - 1] ?? "")) return [];
-      if (/^[0-9]+$/.test(part) && REDIRECT.test(command[index + 1] ?? ""))
-        return [DESCRIPTOR + part];
+    return [part.startsWith("\\") && isPunctuation(part.slice(1)) ? part.slice(1) : part];
+  });
 
-      return [part.startsWith("\\") && isPunctuation(part.slice(1)) ? part.slice(1) : part];
-    });
+  return words.slice(runs(words));
+}
 
-    return words.slice(runs(words));
-  };
+function depthOf(parts: string[]): number {
+  let depth = 0;
+  let leading = true;
+  for (const part of parts)
+    if (isPunctuation(part)) depth += part.split(")").length - part.split("(").length;
+    else if (leading && (part === "{" || part === "}")) depth += part === "}" ? 1 : -1;
+    else leading = false;
 
-  return commands.flatMap((command, at) => {
+  return depth;
+}
+
+function ending(words: string[]): string {
+  if (basename(words[0]!) !== "echo") return "";
+  const end = words.findIndex((word, index) => index > 0 && !/^-[neE]+$/.test(word));
+  return words.slice(1, end < 0 ? undefined : end).some((flag) => flag.includes("n")) ? "" : "\n";
+}
+
+function stdout(command: string[], stderrReturns: boolean): "pipe" | "gone" | "unsure" {
+  const redirects = command.flatMap((part, index) => (REDIRECT.test(part) ? [index] : []));
+  const writes = redirects.filter((index) => {
+    const part = command[index]!;
+    const descriptor = command[index - 1]?.startsWith(DESCRIPTOR)
+      ? command[index - 1]!.slice(1)
+      : undefined;
+
+    return (
+      Number(descriptor) === 1 ||
+      part.startsWith("&") ||
+      (descriptor === undefined && part.includes(">") && !part.startsWith("<"))
+    );
+  });
+
+  if (writes.length === 0) return "pipe";
+  if (redirects.length > 1) return "unsure";
+
+  const part = command[writes[0]!]!;
+  const target = command[writes[0]! + 1] ?? "";
+  if (part === ">&" && target === "1") return "pipe";
+  if (target === "/dev/null" || (part === ">&" && target === "2" && !stderrReturns)) return "gone";
+
+  return "unsure";
+}
+
+function piped(commands: string[][], separators: string[], at: number): string[] {
+  if (!PIPE.test(separators[at - 1] ?? "")) return [];
+
+  let start = at - 1;
+  let depth = depthOf([separators[start]!]) + depthOf(commands[start]!);
+  while (depth > 0 && start > 0) {
+    depth += depthOf([separators[start - 1]!]);
+    if (depth > 0) depth += depthOf(commands[--start]!);
+  }
+
+  if (depth > 0) start = at - 1;
+
+  const joiners = separators.slice(start, at - 1).map((joiner) => joiner.replace(/[()]/g, ""));
+  if (joiners.some((joiner) => !JOINERS.has(joiner))) return [];
+
+  const returns =
+    separators[at - 1]!.includes("|&") || commands[at - 1]!.some((part) => REDIRECT.test(part));
+
+  const members = commands.slice(start, at).flatMap((command, index) => {
     const words = own(command);
-    const runners = basename(words[0] ?? "") === "xargs" ? xargsRunsGit(words.slice(1)) : [];
-    if (runners.length === 0) return [];
+    const output = stdout(command, returns);
+    return words.length === 0 || output === "gone"
+      ? []
+      : [{ words, unsure: output === "unsure" || joiners[index - 1] === "||" }];
+  });
 
-    const producer = at > 0 && PIPE.test(separators[at - 1]!) ? own(commands[at - 1]!) : [];
-    const rows = commands.slice(at + 1).filter((row) => row.length > 0);
+  if (members.some(({ words }) => !PRINTERS.has(basename(words[0]!)))) return [];
 
-    const input = [
-      ...printed(producer.filter((word) => !word.startsWith(DESCRIPTOR))),
-      ...printed(producer.map((word) => word.replace(DESCRIPTOR, ""))),
-      ...command.flatMap((part, index) => (part === "<<<" ? [command[index + 1] ?? ""] : [])),
-      ...(command.includes("<<") ? runners.flatMap((xargs) => bodies(rows, xargs)) : []),
-    ];
-
-    const texts = new Set(input.flatMap((text) => [text, unescaped(text)]));
-    const builds = runners.flatMap((xargs) =>
-      [...texts].flatMap((text) => xargsBuilds(xargs, text)),
+  const texts = (kept: typeof members) => {
+    const readings = kept.map(({ words }) =>
+      printed(words).map((text) =>
+        text.includes("\\c") ? text.slice(0, text.indexOf("\\c")) : text + ending(words),
+      ),
     );
 
-    return builds.map((build) => build.map(quoted).join(" "));
+    return Array.from({ length: Math.max(0, ...readings.map((found) => found.length)) }, (_, at) =>
+      readings.map((found) => found[Math.min(at, found.length - 1)]).join(""),
+    );
+  };
+
+  return [...texts(members), ...texts(members.filter(({ unsure }) => !unsure))];
+}
+
+type Source = string[] | "stdin" | "file";
+
+type Parallel = {
+  command: string[];
+  sources: Source[];
+  slots: Map<string, string>;
+  rules: "default" | "plus" | "custom";
+  argSep: string;
+  fileSep: string;
+  columns?: RegExp | "csv";
+  delimiter?: string;
+  group?: number;
+};
+
+const fromFile = (parallel: Parallel, file: string) =>
+  parallel.sources.push(file === "-" || STDIN_PATHS.has(file) ? "stdin" : "file");
+
+const literally = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const grouping = (parallel: Parallel, value: string) => (parallel.group = count(value));
+const packing = (parallel: Parallel) => (parallel.group = Infinity);
+const splitting = (parallel: Parallel, value: string) => {
+  try {
+    parallel.columns = new RegExp(value);
+  } catch {
+    parallel.columns = new RegExp(literally(value));
+  }
+};
+
+const slot = (modifier: string) => (parallel: Parallel, value: string) =>
+  value && parallel.slots.set(value, modifier);
+
+const PARALLEL_EFFECTS: Record<string, (parallel: Parallel, value: string) => void> = {
+  "-a": fromFile,
+  "--arg-file": fromFile,
+  "--argfile": fromFile,
+  "--arg-sep": (parallel, value) => (parallel.argSep = value),
+  "--argsep": (parallel, value) => (parallel.argSep = value),
+  "--arg-file-sep": (parallel, value) => (parallel.fileSep = value),
+  "--argfilesep": (parallel, value) => (parallel.fileSep = value),
+  "-I": slot(""),
+  "-i": slot(""),
+  "--replace": slot(""),
+  "--extensionreplace": slot("."),
+  "--er": slot("."),
+  "--basenamereplace": slot("/"),
+  "--bnr": slot("/"),
+  "--dirnamereplace": slot("//"),
+  "--dnr": slot("//"),
+  "--basenameextensionreplace": slot("/."),
+  "--bner": slot("/."),
+  "--seqreplace": slot("#"),
+  "--slotreplace": slot("%"),
+  "--plus": (parallel) => parallel.rules === "default" && (parallel.rules = "plus"),
+  "--rpl": (parallel) => (parallel.rules = "custom"),
+  "--parens": (parallel) => (parallel.rules = "custom"),
+  "--header": (parallel) => (parallel.rules = "custom"),
+  "--match": (parallel) => (parallel.rules = "custom"),
+  "-0": (parallel) => (parallel.delimiter = "\0"),
+  "--null": (parallel) => (parallel.delimiter = "\0"),
+  "-d": (parallel, value) => (parallel.delimiter = ansiC(value)),
+  "--delimiter": (parallel, value) => (parallel.delimiter = ansiC(value)),
+  "-C": splitting,
+  "--colsep": splitting,
+  "--col-sep": splitting,
+  "--csv": (parallel) => (parallel.columns = "csv"),
+  "-L": grouping,
+  "-l": grouping,
+  "-m": packing,
+  "-N": grouping,
+  "-n": grouping,
+  "-X": packing,
+  "--max-args": grouping,
+  "--max-lines": grouping,
+  "--max-replace-args": grouping,
+  "--maxargs": grouping,
+  "--maxlines": grouping,
+  "--maxreplaceargs": grouping,
+  "--xargs": packing,
+};
+
+const extensionless = (value: string) => value.replace(/\.[^./]*$/, "");
+const MODIFIERS: Record<string, (value: string) => string> = {
+  ".": extensionless,
+  "/": (value) => value.replace(/^.*\//, ""),
+  "//": (value) => {
+    const path = value.replace(/(.)\/+$/, "$1");
+    return path.includes("/") ? path.replace(/\/+[^/]*$/, "") || "/" : ".";
+  },
+  "/.": (value) => extensionless(value.replace(/^.*\//, "")),
+};
+
+function parallelRuns(words: string[]): Parallel {
+  const parallel: Parallel = {
+    command: [],
+    sources: [],
+    slots: new Map(),
+    rules: "default",
+    argSep: ":::",
+    fileSep: "::::",
+  };
+
+  const start = scan(words, PARALLEL_GRAMMAR, (name, value) =>
+    PARALLEL_EFFECTS[name]?.(parallel, value),
+  );
+
+  let list: string[] | undefined;
+  let files = false;
+  for (const word of words.slice(start))
+    if (word === parallel.argSep || word === parallel.argSep + "+") {
+      list = [];
+      files = false;
+      parallel.sources.push(list);
+    } else if (word === parallel.fileSep || word === parallel.fileSep + "+") files = true;
+    else if (files) fromFile(parallel, word);
+    else if (list) list.push(word);
+    else parallel.command.push(word);
+
+  if (parallel.sources.length === 0) parallel.sources.push("stdin");
+  return parallel;
+}
+
+function product(sources: string[][]): string[][] {
+  return sources.reduce<string[][]>(
+    (tuples, source) => tuples.flatMap((tuple) => source.map((input) => [...tuple, input])),
+    [[]],
+  );
+}
+
+function csvFields(input: string): string[] {
+  const fields = [""];
+
+  let inside = false;
+  for (const char of input)
+    if (char === '"') inside = !inside;
+    else if (char === "," && !inside) fields.push("");
+    else fields[fields.length - 1] += char;
+
+  return fields;
+}
+
+function records(text: string, delimiter: string | undefined): string[] {
+  const found = text.split("\n").flatMap((line) => (delimiter ? line.split(delimiter) : [line]));
+  return found.at(-1) === "" ? found.slice(0, -1) : found;
+}
+
+// Inputs reach the command quoted, so a job that only mentions git stays a mention.
+function parallelJobs(parallel: Parallel, texts: string[], budget: Budget): string[] {
+  const line = parallel.command.join(" ");
+  if (
+    parallel.rules === "custom" ||
+    line.includes("{=") ||
+    /\{-?\d*:/.test(line) ||
+    (parallel.rules === "plus" &&
+      [...line.matchAll(/\{[^{}]*\}/g)].some(([found]) => !SLOT.test(found)))
+  )
+    throw new Unjudged("parallel replacement string could not be read");
+
+  const custom = [...parallel.slots.keys()].map(literally);
+  const pattern = new RegExp([...custom, SLOTS.source].join("|"), "g");
+  const bare = new RegExp(pattern.source).test((parallel.command[0] ?? "").split(/[\s=]/)[0]!);
+  const job = (tuple: string[]) => {
+    if (parallel.command.length === 0) return tuple.join(" ");
+
+    let replaced = false;
+    const text = line.replace(pattern, (found) => {
+      replaced = true;
+
+      const [, position = "", modifier = ""] = SLOT.exec(found) ?? [];
+      const change = MODIFIERS[parallel.slots.get(found) ?? modifier] ?? ((value: string) => value);
+
+      const at = Number(position);
+      const values = at > 0 ? [tuple[at - 1] ?? ""] : at < 0 ? [tuple.at(at) ?? ""] : tuple;
+      return values.map((value) => (bare ? change(value) : quoted(change(value)))).join(" ");
+    });
+
+    return replaced ? text : [line, ...tuple.map(quoted)].join(" ");
+  };
+
+  const columns = (tuple: string[]) =>
+    parallel.columns === undefined
+      ? tuple
+      : tuple.flatMap((input) =>
+          (parallel.columns === "csv" ? csvFields(input) : input.split(parallel.columns!)).map(
+            (field) => field.trim(),
+          ),
+        );
+
+  const readings = parallel.sources.includes("stdin") && texts.length > 0 ? texts : [undefined];
+  return readings.flatMap((text) => {
+    const sources = parallel.sources.map((source) => {
+      const inputs =
+        source === "file" || (source === "stdin" && text === undefined)
+          ? []
+          : source === "stdin"
+            ? records(text!, parallel.delimiter)
+            : source;
+
+      return inputs.length === 0 ? [""] : inputs.map((input) => input.trim());
+    });
+
+    const size = sources.reduce((total, source) => total * source.length, 1);
+    if (size * (parallel.group ? sources.length + 1 : 1) > JOB_BUDGET) throw new Unjudged(TOO_MANY);
+
+    const tuples = product(sources);
+    const flat = parallel.group ? tuples.flat() : [];
+    const width = parallel.group! * sources.length;
+    const groups = flat.map((_, from) => flat.slice(from, from + width));
+
+    const jobs = [...tuples, ...groups]
+      .map(columns)
+      .map(job)
+      .filter((built) => !budget.seen.has(built));
+
+    for (const built of jobs) budget.seen.add(built);
+
+    if (budget.seen.size > JOB_BUDGET) throw new Unjudged(TOO_MANY);
+    return jobs;
+  });
+}
+
+type Budget = { seen: Set<string> };
+
+function relayed(parts: string[], budget: Budget): string[] {
+  const { commands, separators } = pipeline(parts);
+  return commands.flatMap((command, at) => {
+    const words = own(command);
+    const name = basename(words[0] ?? "");
+    const stdin = (runner: string[]) => {
+      const rows = commands.slice(at + 1).filter((row) => row.length > 0);
+      const input = [
+        ...piped(commands, separators, at),
+        ...command.flatMap((part, index) => (part === "<<<" ? [command[index + 1] ?? ""] : [])),
+        ...(command.includes("<<") ? bodies(rows, runner) : []),
+      ];
+
+      return [...new Set(input.flatMap((text) => [text, unescaped(text)]))];
+    };
+
+    if (name === "xargs") {
+      const xargs = xargsRuns(words.slice(1));
+      if (!xargs) return [];
+
+      return stdin(xargs.command)
+        .flatMap((text) => xargsBuilds(xargs, text))
+        .map((build) => build.map(quoted).join(" "));
+    }
+
+    if (!PARALLELS.has(name)) return [];
+
+    const parallel = parallelRuns(words.slice(1));
+    return parallelJobs(parallel, stdin(parallel.command), budget);
   });
 }
 
@@ -1480,7 +1888,7 @@ function allowed(raw: string, parts: string[]): Result | undefined {
   return undefined;
 }
 
-function substituted(raw: string): Result | undefined {
+function substituted(raw: string, budget: Budget): Result | undefined {
   if (!raw.includes("$(") && !raw.includes("`")) return undefined;
 
   let rest = raw;
@@ -1489,7 +1897,7 @@ function substituted(raw: string): Result | undefined {
     match;
     match = /\$\(([^()]*)\)|`([^`]*)`/.exec(rest)
   ) {
-    const inner = classify(match[1] ?? match[2]!);
+    const inner = classify(match[1] ?? match[2]!, budget);
     if (inner.kind === "DENY_SETTING") return inner;
     if (inner.kind === "COMMIT" || inner.kind === "VERB_COMMIT" || inner.kind === "DENY_COMMIT")
       return {
@@ -1516,7 +1924,7 @@ function substituted(raw: string): Result | undefined {
     : undefined;
 }
 
-export function classify(raw: string): Result {
+export function classify(raw: string, budget: Budget = { seen: new Set() }): Result {
   let parts: string[];
   try {
     parts = tokens(raw);
@@ -1543,7 +1951,7 @@ export function classify(raw: string): Result {
 
   if (setsSkills(raw)) return { kind: "DENY_SETTING" };
 
-  const hidden = substituted(raw);
+  const hidden = substituted(raw, budget);
   if (hidden) return hidden;
 
   const exact = allowed(raw, parts);
@@ -1600,7 +2008,7 @@ export function classify(raw: string): Result {
     judged.add(key);
 
     const nested = [...new Set([...segment, segment.join(" ")])].map((part) =>
-      part === raw ? "PASS" : classify(part).kind,
+      part === raw ? "PASS" : classify(part, budget).kind,
     );
 
     if (nested.includes("DENY_SETTING")) return { kind: "DENY_SETTING" };
@@ -1616,9 +2024,20 @@ export function classify(raw: string): Result {
       : { kind: "DENY", detail: "nested command" };
   }
 
-  const built = new Set([...xargsGit(tokens(raw, true)), ...xargsGit(tokens(raw, true, true))]);
+  let built: Set<string>;
+  try {
+    built = new Set(
+      [false, true].flatMap((literal) =>
+        relayed(tokens(raw, true, literal, !literal, true), budget),
+      ),
+    );
+  } catch (error) {
+    if (error instanceof Unjudged) return { kind: "DENY", detail: error.message };
+    throw error;
+  }
+
   for (const command of built) {
-    const kind = command === raw ? "PASS" : classify(command).kind;
+    const kind = command === raw ? "PASS" : classify(command, budget).kind;
     if (kind === "DENY_SETTING") return { kind };
     if (kind === "PASS") continue;
 
