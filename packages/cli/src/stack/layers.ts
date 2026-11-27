@@ -1,8 +1,15 @@
 import { type IndexRow } from "skills-core";
 import type { Io } from "../io.ts";
-import { indexPath, missingIndex } from "../plans/index-tsv.ts";
+import { indexPath, missingIndex, plansDir } from "../plans/index-tsv.ts";
 import type { PlansIndex } from "../plans/projection.ts";
-import { answersAmong, asciiLower, checkoutIs, defaultBranch, readCheckout } from "../project.ts";
+import {
+  answersAmong,
+  asciiLower,
+  checkoutIs,
+  defaultBranch,
+  projectDirectories,
+  readCheckout,
+} from "../project.ts";
 import {
   ancestor,
   apply,
@@ -40,6 +47,7 @@ export async function projectIndexes(project: string | undefined, io: Io): Promi
     const [answer] = answersAmong(
       names,
       indexes.map((index) => index.project),
+      projectDirectories(plansDir(io.env), names),
     );
 
     const owner = indexes.find((index) => index.project === answer?.project);

@@ -118,18 +118,25 @@ export function checkoutOf(
   return { inside: true, repo, names };
 }
 
-export function answersAmong(names: readonly Name[], projects: readonly string[]): Answer[] {
+export function answersAmong(
+  names: readonly Name[],
+  projects: readonly string[],
+  pinDirectories: readonly string[] = projects,
+): Answer[] {
   const sorted = [...projects].sort();
   const found: Answer[] = [];
+  const pinned = names.some(
+    ({ step, name }) =>
+      step === "pin" &&
+      pinDirectories.some((directory) => asciiLower(directory) === asciiLower(name)),
+  );
 
-  let pinned = false;
   for (const { step, name } of names) {
     if (step === "main" && pinned) continue;
 
     const matches = sorted.filter((candidate) => asciiLower(candidate) === asciiLower(name));
     if (matches.length === 0) continue;
 
-    pinned ||= step === "pin";
     const project = matches.find((match) => !found.some((answer) => answer.project === match));
     if (project !== undefined) found.push({ step, project });
   }

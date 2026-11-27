@@ -552,3 +552,14 @@ test("a checkout pinned to its project beats and owns its stack under any folder
   const { owners } = await projectIndexes(undefined, captureIo(fix.env, moved));
   expect(owners?.map((index) => index.project)).toEqual(["Demo"]);
 });
+
+test("a pin naming a project with no index leaves the stack unowned, not the main folder's", async () => {
+  const fix = await fixture();
+  mkdirSync(join(fix.root, "Beta"));
+
+  expect((await projectIndexes(undefined, captureIo(fix.env, fix.repo))).owners).toHaveLength(1);
+
+  await fixtureGit(fix.repo, ["config", "--local", "skills.project", "beta"]);
+
+  expect((await projectIndexes(undefined, captureIo(fix.env, fix.repo))).owners).toEqual([]);
+});
