@@ -19,7 +19,7 @@ export type Checkout = { base: Repo; world: World; branch: string };
 export async function trailProject(io: Io): Promise<string> {
   return (
     (await detectProject(io.cwd, plansDir(io.env), true)) ??
-    (await readCheckout(io.cwd, true, io)).candidates.at(-1)!
+    (await readCheckout(io.cwd, true, io)).names.at(-1)!.name
   );
 }
 
@@ -69,8 +69,9 @@ export async function readBase(project: string, io: Io): Promise<Repo | string> 
   if (!trunk) return "cannot read the default branch of origin";
 
   const trail = await trailProject(io);
-  const { candidates } = await readCheckout(io.cwd, true, io);
-  return { project, trail, repos: [trail, ...candidates], trunk };
+  const { names } = await readCheckout(io.cwd, true, io);
+  const folders = names.filter(({ step }) => step !== "pin").map(({ name }) => name);
+  return { project, trail, repos: [trail, ...folders], trunk };
 }
 
 export async function readOwnCheckout(io: Io, create: boolean): Promise<Checkout | string> {

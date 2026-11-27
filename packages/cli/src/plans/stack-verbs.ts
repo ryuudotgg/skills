@@ -12,7 +12,7 @@ import { ghOutput } from "../gh.ts";
 import type { LeaseSession } from "../hub/plan-leases.ts";
 import type { Io } from "../io.ts";
 import { readDeclarations, type Declaration } from "../reviewers/declaration.ts";
-import { checkoutIs, defaultBranch, gitOutput } from "../project.ts";
+import { checkoutIs, defaultBranch, gitOutput, learnProject } from "../project.ts";
 import { describe } from "../read.ts";
 import { git } from "../run.ts";
 import { chain, recordBase, recordedBase } from "../stack/skills-base.ts";
@@ -660,7 +660,9 @@ async function takeLeases(
 }
 
 async function recordingCheckout(code: number, io: Io): Promise<number> {
-  if (code === 0) await recordCheckout(io);
+  if (code === 0)
+    await Promise.all([learnProject(io.cwd, plansDir(io.env), io), recordCheckout(io)]);
+
   return code;
 }
 

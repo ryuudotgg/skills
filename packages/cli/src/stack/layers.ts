@@ -2,7 +2,7 @@ import { type IndexRow } from "skills-core";
 import type { Io } from "../io.ts";
 import { indexPath, missingIndex } from "../plans/index-tsv.ts";
 import type { PlansIndex } from "../plans/projection.ts";
-import { asciiLower, checkoutIs, defaultBranch, readCheckout } from "../project.ts";
+import { answersAmong, asciiLower, checkoutIs, defaultBranch, readCheckout } from "../project.ts";
 import {
   ancestor,
   apply,
@@ -36,13 +36,13 @@ type Indexes = { indexes: PlansIndex[]; owners?: PlansIndex[] };
 export async function projectIndexes(project: string | undefined, io: Io): Promise<Indexes> {
   if (project === undefined) {
     const indexes = await readPlans(io.env);
-    const { candidates } = await readCheckout(io.cwd, false, io);
-    const owner = candidates
-      .map((candidate) =>
-        indexes.find((index) => asciiLower(index.project) === asciiLower(candidate)),
-      )
-      .find(Boolean);
+    const { names } = await readCheckout(io.cwd, false, io);
+    const [answer] = answersAmong(
+      names,
+      indexes.map((index) => index.project),
+    );
 
+    const owner = indexes.find((index) => index.project === answer?.project);
     return { indexes, owners: owner ? [owner] : [] };
   }
 
