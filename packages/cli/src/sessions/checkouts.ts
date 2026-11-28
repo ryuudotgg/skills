@@ -1,4 +1,4 @@
-import { lstatSync } from "node:fs";
+import { lstatSync, statSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { isDirectory } from "../io.ts";
 import { asciiLower } from "../project.ts";
@@ -48,7 +48,7 @@ function sameDirectory(one: string, other: string): boolean {
   try {
     const first = lstatSync(one, { bigint: true });
     const second = lstatSync(other, { bigint: true });
-    return first.isDirectory() && first.dev === second.dev && first.ino === second.ino;
+    return first.dev === second.dev && first.ino === second.ino && statSync(one).isDirectory();
   } catch {
     return false;
   }

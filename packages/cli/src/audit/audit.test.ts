@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, renameSync, rmSync } from "node:fs";
+import { existsSync, renameSync, rmSync, symlinkSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, realpath, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1335,6 +1335,10 @@ describe("the default store covers every checkout of the repository", () => {
     rmSync(join(worktrees, "Repo"), { recursive: true });
     const folds = existsSync(join(home, ".t3/WORKTREES"));
     expect((await run(main)).found).toBe(without.found + (folds ? 1 : 0));
+
+    symlinkSync(join(root, "work/other"), join(worktrees, "Repo"));
+    const linked = existsSync(join(worktrees, "repo"));
+    expect((await run(main)).found).toBe(without.found + (linked ? 1 : 0));
   });
 
   test("a Workflow agent counts as a subagent run, and its journal does not", async () => {
