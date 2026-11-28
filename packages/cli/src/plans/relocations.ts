@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { foldsCase } from "../io.ts";
+import { asciiLower } from "../project.ts";
 import { replaceDurably } from "./index-tsv.ts";
 
 export const RELOCATIONS = "relocations.tsv";
@@ -104,22 +106,32 @@ export function dropPending(plans: string, target: string): void {
   writeRelocations(plans, kept);
 }
 
+type Settled = { readonly row: Relocation; readonly spelled: (path: string) => string };
+
+const asWritten = (path: string): string => path;
+
 export function relocationRecord(plans: string): RelocationRecord {
-  let settled: Relocation[] | undefined;
-  const settledRows = (): Relocation[] =>
+  let settled: Settled[] | undefined;
+  const settledRows = (): Settled[] =>
     (settled ??= readRelocations(plans)
       .filter((row) => row.at !== null)
-      .sort((a, b) => (a.at ?? 0) - (b.at ?? 0)));
+      .sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
+      .map((row) => ({ row, spelled: foldsCase(row.target) ? asciiLower : asWritten })));
 
   return {
     placesOf(directory) {
       return settledRows()
-        .filter((row) => inside(directory, row.source) && existsSync(row.target))
-        .map((row) => ({ row, place: placeUnder(directory, row.source, row.target) }));
+        .filter(
+          ({ row, spelled }) =>
+            inside(spelled(directory), spelled(row.source)) && existsSync(row.target),
+        )
+        .map(({ row }) => ({ row, place: placeUnder(directory, row.source, row.target) }));
     },
 
     formerPathsOf(checkout) {
-      return settledRows().flatMap((row) => (row.target === checkout ? row.source : []));
+      return settledRows().flatMap(({ row, spelled }) =>
+        spelled(row.target) === spelled(checkout) ? row.source : [],
+      );
     },
   };
 }

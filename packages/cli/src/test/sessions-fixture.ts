@@ -167,8 +167,8 @@ export type RelocatedSources = { readonly old: string; readonly app: string };
 export async function relocatedSources(
   m: SessionsMachine,
   line: string,
+  old = join(m.root, "old/Alpha"),
 ): Promise<RelocatedSources> {
-  const old = join(m.root, "old/Alpha");
   const app = join(old, "app");
 
   mkdirSync(app, { recursive: true });

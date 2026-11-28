@@ -1253,6 +1253,30 @@ test("a relocated checkout's session redacts env values read at its new place", 
   expect(transcripts(m).map((record) => record.chunk)).toEqual([0, 1]);
 });
 
+test("a relocated checkout under another spelling redacts where the disk folds case", async () => {
+  const m = await machine();
+  const value = "Zq8vT3nW6pR1yK4mH2";
+  const capitalised = join(m.root, "Old");
+  await relocatedSources(m, `DEPLOY_KEY=${value}`, capitalised);
+
+  const old = join(m.root, "old");
+  renameSync(capitalised, old);
+  relocate(m, old, join(m.root, "new"));
+  const folds = existsSync(join(m.root, "NEW"));
+
+  appendFileSync(m.claude, `{"type":"user","message":{"content":"deploy with ${value}"}}\n`);
+  age(m.claude);
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(chunk(m).made).toBe(1);
+
+  const last = transcripts(m).at(-1);
+  for (const blob of [text(m, last?.sha256 ?? ""), text(m, last?.digest ?? "")])
+    if (folds) {
+      expect(blob).toContain("deploy with [redacted:env]");
+      expect(blob).not.toContain(value);
+    } else expect(blob).toContain(`deploy with ${value}`);
+});
+
 test("a relocated checkout moved twice is read at its last place", async () => {
   const m = await machine();
   const value = "Zq8vT3nW6pR1yK4mH2";

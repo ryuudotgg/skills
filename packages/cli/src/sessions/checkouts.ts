@@ -1,6 +1,6 @@
-import { lstatSync, realpathSync, statSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
-import { isDirectory } from "../io.ts";
+import { realpathSync } from "node:fs";
+import { basename, join } from "node:path";
+import { foldsCase, isDirectory } from "../io.ts";
 import { RELOCATIONS, relocationRecord } from "../plans/relocations.ts";
 import { asciiLower } from "../project.ts";
 import { readSync } from "../read.ts";
@@ -47,40 +47,6 @@ function physical(path: string): string {
   } catch {
     return path;
   }
-}
-
-function nearestExisting(path: string): string | undefined {
-  for (let at = path; ; at = dirname(at))
-    try {
-      lstatSync(at);
-      return at;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(at) === at)
-        return undefined;
-    }
-}
-
-function sameDirectory(one: string, other: string): boolean {
-  try {
-    const first = lstatSync(one, { bigint: true });
-    const second = lstatSync(other, { bigint: true });
-    return first.dev === second.dev && first.ino === second.ino && statSync(one).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-function foldsCase(root: string): boolean {
-  const parts = nearestExisting(root)?.split("/") ?? [];
-  const last = parts.findLastIndex((part) => /[A-Za-z]/u.test(part));
-  if (last === -1) return false;
-
-  const respelled = parts[last]!.replace(/[A-Za-z]/gu, (letter) =>
-    letter === letter.toLowerCase() ? letter.toUpperCase() : letter.toLowerCase(),
-  );
-
-  const kept = parts.slice(0, last);
-  return sameDirectory([...kept, parts[last]].join("/"), [...kept, respelled].join("/"));
 }
 
 function within(root: string, path: string): boolean {
