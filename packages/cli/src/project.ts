@@ -258,6 +258,60 @@ async function remoteKeys(readGit: ReadGit): Promise<RemoteKey[] | undefined> {
   });
 }
 
+function pinKeyOf(keys: readonly RemoteKey[]): string | undefined {
+  return (keys.find(({ remote }) => remote === "origin") ?? keys[0])?.key;
+}
+
+function pinWrites(project: string, key: string | undefined): string[][] {
+  return [
+    ["--replace-all", PIN_NAME, project],
+    key ? ["--replace-all", PIN_KEY, key] : ["--unset-all", PIN_KEY],
+  ];
+}
+
+async function writeConfig(
+  cwd: string,
+  writes: readonly string[][],
+  io: Io,
+): Promise<string | undefined> {
+  for (const args of writes) {
+    const result = await gitRead(cwd, ["config", "--local", ...args], {}, io);
+    if (!result.ok) return describe(result.failure);
+
+    const absent = args[0] === "--unset-all" && result.code === 5;
+    if (result.code !== 0 && !absent)
+      return result.stderr.trim() || `git config exited ${result.code}`;
+  }
+
+  return undefined;
+}
+
+export async function checkoutPinKey(
+  cwd: string,
+  io: Io = processIo(),
+): Promise<{ ok: true; key?: string } | { ok: false }> {
+  const keys = await remoteKeys(gitReader(cwd, io));
+  if (keys === undefined) return { ok: false };
+
+  const key = pinKeyOf(keys);
+  return key ? { ok: true, key } : { ok: true };
+}
+
+export function writePin(
+  cwd: string,
+  pin: Pin | undefined,
+  io: Io = processIo(),
+): Promise<string | undefined> {
+  const writes = pin
+    ? pinWrites(pin.name, pin.key)
+    : [
+        ["--unset-all", PIN_NAME],
+        ["--unset-all", PIN_KEY],
+      ];
+
+  return writeConfig(cwd, writes, io);
+}
+
 async function checkoutKeys(readGit: ReadGit): Promise<string[]> {
   const keys = (await remoteKeys(readGit)) ?? [];
   return [...new Set(keys.map(({ key }) => key))];
@@ -383,13 +437,10 @@ export async function learnProject(
   const keys = await remoteKeys(readGit);
   if (keys === undefined) return answer?.project;
 
-  const key = (keys.find(({ remote }) => remote === "origin") ?? keys[0])?.key;
-  const config = (args: string[]) => gitRead(cwd, ["config", "--local", ...args], {}, io);
-  if (learned !== undefined) {
-    const pinned = await config(["--replace-all", PIN_NAME, learned]);
-    if (pinned.ok && pinned.code === 0)
-      await config(key ? ["--replace-all", PIN_KEY, key] : ["--unset-all", PIN_KEY]);
-  } else if (key) await config(["--replace-all", PIN_KEY, key]);
+  const key = pinKeyOf(keys);
+  if (learned !== undefined)
+    await writePin(cwd, key ? { name: learned, key } : { name: learned }, io);
+  else if (key) await writeConfig(cwd, [["--replace-all", PIN_KEY, key]], io);
 
   return answer?.project;
 }
