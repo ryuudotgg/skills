@@ -5,12 +5,13 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   MACHINE_EVENT,
   POLICY_EVENT,
@@ -21,6 +22,7 @@ import {
   type TranscriptRecord,
 } from "skills-core";
 import { importStore } from "../plans/import.ts";
+import { settleRelocation, writePending } from "../plans/relocations.ts";
 import { appendEvent, blobBytes, openStore, write, type Store } from "../plans/store.ts";
 import { SCAN_DB } from "../sessions/policy.ts";
 import { scanSessions } from "../sessions/scan.ts";
@@ -124,9 +126,6 @@ export async function envSources(
     writeFileSync(join(directory, ".env"), `${env}\n`);
   }
 
-  const recorded = readFileSync(m.claude, "utf8");
-  writeFileSync(m.claude, recorded.replaceAll("/tmp/sessions-fixture/checkout/Alpha", worktree));
-
   write(m.store, () =>
     appendEvent(m.store, {
       kind: "stored",
@@ -148,13 +147,44 @@ export async function envSources(
     }),
   );
 
+  await recordAt(m, worktree);
+  return { worktree, checkout };
+}
+
+async function recordAt(m: SessionsMachine, cwd: string): Promise<void> {
+  const recorded = readFileSync(m.claude, "utf8");
+  writeFileSync(m.claude, recorded.replaceAll("/tmp/sessions-fixture/checkout/Alpha", cwd));
   age(m.claude);
 
   for (const suffix of ["", "-wal", "-shm"])
     rmSync(join(m.plans, SCAN_DB + suffix), { force: true });
 
   await scanSessions(m.plans, hostDirs(m.env));
-  return { worktree, checkout };
+}
+
+export type RelocatedSources = { readonly old: string; readonly app: string };
+
+export async function relocatedSources(
+  m: SessionsMachine,
+  line: string,
+): Promise<RelocatedSources> {
+  const old = join(m.root, "old/Alpha");
+  const app = join(old, "app");
+
+  mkdirSync(app, { recursive: true });
+  writeFileSync(join(app, ".env"), `${line}\n`);
+  await recordAt(m, app);
+  return { old, app };
+}
+
+export function relocate(m: SessionsMachine, from: string, to: string, at = Date.now()): string {
+  mkdirSync(dirname(to), { recursive: true });
+  const target = join(realpathSync(dirname(to)), basename(to));
+
+  writePending(m.plans, [from], target);
+  renameSync(from, to);
+  settleRelocation(m.plans, target, at);
+  return target;
 }
 
 export type LedgerMachine = {

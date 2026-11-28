@@ -5,6 +5,7 @@ import {
   chmodSync,
   copyFileSync,
   cpSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -16,17 +17,21 @@ import { basename, dirname, join } from "node:path";
 import { BLOB_MAX, CHUNK_SIZE, POLICY_EVENT, SESSION_EVENT, type SessionPolicy } from "skills-core";
 import type { Io } from "../io.ts";
 import { tryLock } from "../lock.ts";
+import { readRelocations, relocationRecord, writePending } from "../plans/relocations.ts";
 import { appendEvent, write } from "../plans/store.ts";
 import {
   age,
   blobText,
   envSources,
+  relocate,
+  relocatedSources,
   sessionsMachine,
   setPolicy,
   transcripts as recorded,
   type SessionsMachine as Machine,
 } from "../test/sessions-fixture.ts";
 import { chunkTranscripts, uncutBytes } from "./chunks.ts";
+import { envReading, originOf, sessionSecrets } from "./chunks.ts";
 import { scanSessions } from "./scan.ts";
 import { hostDirs } from "./transcripts.ts";
 import { policyVerb } from "./verbs.ts";
@@ -1211,4 +1216,123 @@ test("a removed worktree's session still redacts env values through the register
   }
 
   expect(transcripts(m).map((record) => record.chunk)).toEqual([0, 1]);
+});
+
+test("a relocated checkout's session redacts env values read at its new place", async () => {
+  const m = await machine();
+  const value = "Zq8vT3nW6pR1yK4mH2";
+  const { old, app } = await relocatedSources(m, `DEPLOY_KEY=${value}`);
+  expect(m.store.db.query("SELECT 1 FROM events WHERE type = 'machine'").all()).toEqual([]);
+
+  relocate(m, old, join(m.root, "new/Alpha"));
+
+  const uploaded = async (content: string) => {
+    appendFileSync(m.claude, `{"type":"user","message":{"content":"${content}"}}\n`);
+    age(m.claude);
+    await scanSessions(m.plans, hostDirs(m.env));
+    expect(chunk(m).made).toBe(1);
+
+    const last = transcripts(m).at(-1);
+    return [text(m, last?.sha256 ?? ""), text(m, last?.digest ?? "")];
+  };
+
+  for (const blob of await uploaded(`deploy with ${value}`)) {
+    expect(blob).toContain("deploy with [redacted:env]");
+    expect(blob).not.toContain(value);
+  }
+
+  expect(transcripts(m)[0]).toMatchObject({ chunk: 0, cwd: app, root: old });
+
+  mkdirSync(app, { recursive: true });
+
+  for (const blob of await uploaded(`again with ${value}`)) {
+    expect(blob).toContain("again with [redacted:env]");
+    expect(blob).not.toContain(value);
+  }
+
+  expect(transcripts(m).map((record) => record.chunk)).toEqual([0, 1]);
+});
+
+test("a relocated checkout moved twice is read at its last place", async () => {
+  const m = await machine();
+  const value = "Zq8vT3nW6pR1yK4mH2";
+  const { old, app } = await relocatedSources(m, `DEPLOY_KEY=${value}`);
+  const middle = relocate(m, old, join(m.root, "middle/Alpha"));
+  const last = relocate(m, middle, join(m.root, "last/Alpha"));
+
+  expect(readRelocations(m.plans)[0]).toMatchObject({ source: old, target: last });
+
+  const reading = envReading(m.env, relocationRecord(m.plans));
+  const secrets = sessionSecrets(m.store.db, originOf(app, reading), () => "Alpha", reading);
+  expect(secrets).toEqual([value]);
+});
+
+test("a relocated checkout's pending row changes no reading", async () => {
+  const m = await machine();
+  const { old, app } = await relocatedSources(m, "DEPLOY_KEY=Zq8vT3nW6pR1yK4mH2");
+  const to = join(m.root, "new/Alpha");
+
+  mkdirSync(dirname(to), { recursive: true });
+  writePending(m.plans, [old], to);
+  renameSync(old, to);
+
+  const reading = envReading(m.env, relocationRecord(m.plans));
+  const origin = originOf(app, reading);
+  expect(origin).toEqual({ cwd: app, root: app, home: m.env.HOME ?? "" });
+  expect(sessionSecrets(m.store.db, origin, () => "Alpha", reading)).toEqual([]);
+});
+
+test("a relocated checkout's registered checkout is read at its place under a row", async () => {
+  const m = await machine();
+  const value = "Zq8vT3nW6pR1yK4mH2";
+  const { worktree, checkout } = await envSources(m, "PORT=3000", `DEPLOY_KEY=${value}`);
+  rmSync(worktree, { recursive: true });
+  relocate(m, checkout, join(m.root, "moved/Alpha"));
+
+  appendFileSync(m.claude, `{"type":"user","message":{"content":"deploy with ${value}"}}\n`);
+  age(m.claude);
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(chunk(m).made).toBe(1);
+
+  const [only] = transcripts(m);
+  for (const blob of [text(m, only?.sha256 ?? ""), text(m, only?.digest ?? "")]) {
+    expect(blob).toContain("deploy with [redacted:env]");
+    expect(blob.includes(value)).toBe(false);
+  }
+});
+
+test("a relocated checkout with no relocations.tsv chunks as before", async () => {
+  const m = await machine();
+  const value = "Zq8vT3nW6pR1yK4mH2";
+  const { old, app } = await relocatedSources(m, `DEPLOY_KEY=${value}`);
+  renameSync(old, join(m.root, "new"));
+
+  appendFileSync(m.claude, `{"type":"user","message":{"content":"deploy with ${value}"}}\n`);
+  age(m.claude);
+  await scanSessions(m.plans, hostDirs(m.env));
+  expect(chunk(m).made).toBe(1);
+
+  const [only] = transcripts(m);
+  expect(only).toMatchObject({ chunk: 0, cwd: app, root: app });
+  expect(text(m, only?.sha256 ?? "").includes(`deploy with ${value}`)).toBe(true);
+  expect(existsSync(join(m.plans, "relocations.tsv"))).toBe(false);
+});
+
+test("a relocated checkout's session reads the env values at its new toplevel", async () => {
+  const m = await machine();
+  const value = "Zq8vT3nW6pR1yK4mH2";
+  const { old, app } = await relocatedSources(m, "PORT=3000");
+  writeFileSync(join(old, ".env"), `DEPLOY_KEY=${value}\n`);
+  expect(Bun.spawnSync(["git", "init", "-q", old]).exitCode).toBe(0);
+
+  const moved = relocate(m, old, join(m.root, "new/Alpha "));
+  mkdirSync(join(moved, "app/deeper"));
+  relocate(m, join(moved, "app/deeper"), join(m.root, "elsewhere/deeper"));
+
+  const reading = envReading(m.env, relocationRecord(m.plans));
+  const origin = originOf(join(app, "deeper"), reading);
+  expect(origin?.root).toBe(join(old, "app/deeper"));
+  expect(sessionSecrets(m.store.db, originOf(app, reading), () => "Alpha", reading)).toEqual([
+    value,
+  ]);
 });

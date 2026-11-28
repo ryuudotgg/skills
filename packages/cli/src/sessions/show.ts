@@ -11,7 +11,8 @@ import {
 import type { Fetch } from "../plans/outbox.ts";
 import type { Database } from "bun:sqlite";
 import { blobBytes, isDeleted, RECORDED_HERE, sha256, type Store } from "../plans/store.ts";
-import { mainFile, originOf, sessionSecrets } from "./chunks.ts";
+import { relocationRecord } from "../plans/relocations.ts";
+import { envReading, mainFile, originOf, sessionSecrets } from "./chunks.ts";
 import { copyDigest, digestText, foldDigest, freshDigest, type Digest } from "./digest.ts";
 import { lineText, sessionLines, type SessionLine } from "./ledger.ts";
 import {
@@ -179,8 +180,9 @@ type Local = { file: LocalFile | undefined; secrets: string[] };
 
 function localSource(db: Database, root: string, env: NodeJS.ProcessEnv, line: SessionLine): Local {
   const file = localFile(root, env, line);
-  const origin = originOf(file?.cwd ?? null, env);
-  return { file, secrets: sessionSecrets(db, origin, () => line.project) };
+  const reading = envReading(env, relocationRecord(root));
+  const origin = originOf(file?.cwd ?? null, reading);
+  return { file, secrets: sessionSecrets(db, origin, () => line.project, reading) };
 }
 
 function recordedHere(db: Database, line: SessionLine): boolean {
