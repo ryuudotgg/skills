@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { HEARTBEAT_EVERY_MS } from "skills-core/pulse";
 import { writeJsonAtomic } from "../io.ts";
 import { plansDir } from "../plans/paths.ts";
-import { answersFor, checkoutOf, pinRead } from "../project.ts";
+import { answersFor, checkoutAt, pinRead } from "../project.ts";
 import { readSync } from "../read.ts";
 import { scrubGitEnv } from "./git-env.ts";
 import { sessionOf } from "./payload.ts";
@@ -63,13 +63,13 @@ async function placeOf(
   const branch = head.slice("refs/heads/".length);
   if (defaultBranches(common).includes(branch)) return undefined;
 
-  const pin = readSync(["git", ...pinRead], options);
-  const checkout = checkoutOf(top, common, cwd, pin.ok && pin.code === 0 ? pin.stdout : undefined);
-  const [answer] = await answersFor(checkout, root, async (args) => {
+  const readGit = async (args: readonly string[]) => {
     const read = readSync(["git", ...args], options);
     return read.ok && read.code === 0 ? read.stdout : undefined;
-  });
+  };
 
+  const checkout = await checkoutAt(top, common, cwd, await readGit(pinRead), readGit);
+  const [answer] = await answersFor(checkout, root, readGit);
   return answer && { project: answer.project, branch };
 }
 
