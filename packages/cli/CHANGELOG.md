@@ -1,3 +1,37 @@
+## 1.6.0
+
+*November 28, 2026*
+
+### ✨ New
+
+- **Pin a checkout to its project with `skills plans bind`** ([#623](https://github.com/ryuudotgg/skills/pull/623))\
+  `skills plans bind <Project>` saves the project in the checkout's git config, and detection uses it when the checkout's folder names no project, as in a fresh clone or each repository of a project that spans several. `skills plans bind --clear` removes it.
+
+### 🎨 Improved
+
+- **Checkouts keep their project after a rename** ([#615](https://github.com/ryuudotgg/skills/pull/615))\
+  When the session start hook or `skills plans start` resolves a checkout by its main folder name, it records the project in the checkout's local git config, so the checkout keeps resolving to that project after its folder is renamed or moved, and so does every linked worktree whose own folder names no project.
+- **A copied checkout stops answering to the project it was copied from** ([#620](https://github.com/ryuudotgg/skills/pull/620))\
+  A checkout's project pin now remembers the repository it was written for, so a copy pointed at another remote resolves by its other names instead of the original's project, and answers again once its remotes point back. Pins written before keep working, and the next session start or `skills plans start` records their repository.
+- **Fresh clones resolve to their project by remote** ([#619](https://github.com/ryuudotgg/skills/pull/619))\
+  A checkout whose folder name matches no project now resolves to the project some machine recorded for the same repository, comparing remote URLs by host and path, so a clone under any folder name finds its backlog and the session start hook or `skills plans start` then pins it.
+- **Agents bind a checkout after asking for its project** ([#624](https://github.com/ryuudotgg/skills/pull/624))\
+  The plans skill now states the four steps project detection takes, and once you name the project for a checkout no step resolved, the agent runs `skills plans bind` there so later sessions resolve it.
+
+### 🐛 Fixed
+
+- **Audit keeps counting a relocated checkout's earlier sessions** ([#621](https://github.com/ryuudotgg/skills/pull/621))\
+  `skills audit` in a relocated checkout counts the sessions recorded at its former paths whose transcripts moved with it, and the T3 Code worktrees made under a former folder name.
+- **Audit counts sessions of a checkout renamed to another letter case** ([#617](https://github.com/ryuudotgg/skills/pull/617))\
+  `skills audit` counts the sessions a checkout or its T3 Code worktree recorded under another letter case of its folder name, on a disk that ignores case. On a disk that keeps case the two spellings stay separate checkouts.
+- **Relocated sessions keep redacting after a folder changed case** ([#622](https://github.com/ryuudotgg/skills/pull/622))\
+  On a disk that ignores letter case, a session recorded under a checkout folder's old capitalisation still reads its `.env` values at the checkout's new place, so a `.env` in a subdirectory keeps redacting.
+
+### 🧰 Internal
+
+- **Sessions read env values through the relocation record** ([#618](https://github.com/ryuudotgg/skills/pull/618))\
+  `plans/relocations.ts` reads and writes `<plans>/relocations.tsv`, and the chunker, the push gate and `sessions show` also read `.env` files at a relocated session directory's new place, so a checkout moved through that record keeps its redaction.
+
 ## 1.5.2
 
 *November 26, 2026*
