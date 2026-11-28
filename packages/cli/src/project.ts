@@ -1,6 +1,7 @@
 import { readdirSync, statSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { processIo, type Io } from "./io.ts";
+import { plansDir } from "./plans/paths.ts";
 import { describe, read, type Read, type ReadFailure } from "./read.ts";
 
 type GitOptions = {
@@ -61,37 +62,108 @@ export function asciiLower(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 
-type Checkout = { inside: boolean; repo: string; candidates: string[] };
+const PIN_KEY = "skills.project";
+
+export const pinRead = ["config", "--local", "--get", PIN_KEY] as const;
+
+export type Step = "folder" | "pin" | "main";
+
+export type Name = { step: Step; name: string };
+
+export type Answer = { step: Step; project: string };
+
+type Checkout = { inside: boolean; repo: string; names: Name[] };
 
 export async function readCheckout(
   cwd: string,
   quiet = false,
   io: Io = processIo(),
 ): Promise<Checkout> {
-  const output = await gitOutput(
-    cwd,
-    ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"],
-    { quiet },
-    io,
-  );
+  const [output, pin] = await Promise.all([
+    gitOutput(
+      cwd,
+      ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"],
+      { quiet },
+      io,
+    ),
+    gitOutput(cwd, pinRead, { quiet: true }, io),
+  ]);
 
   const [top, common] = output?.split("\n") ?? [];
-  return checkoutOf(top, common, cwd);
+  return checkoutOf(top, common, cwd, pin);
 }
 
 export function checkoutOf(
   top: string | undefined,
   common: string | undefined,
   cwd: string,
+  pin?: string,
 ): Checkout {
   const repo = basename(top || cwd);
+  if (!top) return { inside: false, repo, names: [{ step: "folder", name: repo }] };
+
   const main = common
     ? basename(common) === ".git"
       ? basename(dirname(common))
       : basename(common).replace(/\.git$/, "")
     : "";
 
-  return { inside: Boolean(top), repo, candidates: main && main !== repo ? [repo, main] : [repo] };
+  const pinned = pin?.replace(/\n$/, "");
+  const names: Name[] = [
+    ...(main && main !== repo ? [{ step: "folder" as const, name: repo }] : []),
+    ...(pinned ? [{ step: "pin" as const, name: pinned }] : []),
+    { step: "main", name: main || repo },
+  ];
+
+  return { inside: true, repo, names };
+}
+
+export function answersAmong(
+  names: readonly Name[],
+  projects: readonly string[],
+  pinDirectories: readonly string[] = projects,
+): Answer[] {
+  const sorted = [...projects].sort();
+  const found: Answer[] = [];
+  const pinned = names.some(
+    ({ step, name }) =>
+      step === "pin" &&
+      pinDirectories.some((directory) => asciiLower(directory) === asciiLower(name)),
+  );
+
+  for (const { step, name } of names) {
+    if (step === "main" && pinned) continue;
+
+    const matches = sorted.filter((candidate) => asciiLower(candidate) === asciiLower(name));
+    if (matches.length === 0) continue;
+
+    const project = matches.find((match) => !found.some((answer) => answer.project === match));
+    if (project !== undefined) found.push({ step, project });
+  }
+
+  return found;
+}
+
+export function projectDirectories(plansDir: string, names: readonly Name[]): string[] {
+  const wanted = new Set(names.map(({ name }) => asciiLower(name)));
+  if (wanted.size === 0) return [];
+
+  let entries: string[];
+  try {
+    entries = readdirSync(plansDir).filter(
+      (name) => !name.startsWith(".") && wanted.has(asciiLower(name)),
+    );
+  } catch {
+    return [];
+  }
+
+  return entries.filter((name) => {
+    try {
+      return statSync(`${plansDir}/${name}`).isDirectory();
+    } catch {
+      return false;
+    }
+  });
 }
 
 export async function checkoutIs(
@@ -101,10 +173,30 @@ export async function checkoutIs(
 ): Promise<string | undefined> {
   const checkout = await readCheckout(cwd, false, io);
   if (!checkout.inside) return `not inside a git repository, not a checkout of ${project}`;
-  if (checkout.candidates.some((name) => asciiLower(name) === asciiLower(project)))
-    return undefined;
 
-  return `this checkout is ${checkout.repo}, not a checkout of ${project}`;
+  const wanted = asciiLower(project);
+  const pins = checkout.names.filter(({ step }) => step === "pin");
+  const pin = answersAmong(pins, projectDirectories(plansDir(io.env), pins))[0]?.project;
+  const passes = checkout.names.some(({ step, name }) =>
+    step === "pin"
+      ? pin !== undefined && asciiLower(pin) === wanted
+      : (step === "folder" || pin === undefined) && asciiLower(name) === wanted,
+  );
+
+  if (passes) return undefined;
+
+  const pinned = pin === undefined ? "" : ` pinned to ${pin}`;
+  return `this checkout is ${checkout.repo}${pinned}, not a checkout of ${project}`;
+}
+
+async function detectAnswers(
+  cwd: string,
+  plansDir: string,
+  quiet = false,
+  io: Io = processIo(),
+): Promise<Answer[]> {
+  const { names } = await readCheckout(cwd, quiet, io);
+  return answersAmong(names, projectDirectories(plansDir, names));
 }
 
 export async function detectProjects(
@@ -113,34 +205,7 @@ export async function detectProjects(
   quiet = false,
   io: Io = processIo(),
 ): Promise<string[]> {
-  const { candidates } = await readCheckout(cwd, quiet, io);
-  return projectsNamed(candidates, plansDir);
-}
-
-export function projectsNamed(candidates: readonly string[], plansDir: string): string[] {
-  let entries: string[];
-  try {
-    entries = readdirSync(plansDir)
-      .filter((name) => !name.startsWith("."))
-      .sort();
-  } catch {
-    return [];
-  }
-
-  const found: string[] = [];
-  for (const candidate of candidates)
-    for (const name of entries) {
-      if (asciiLower(name) !== asciiLower(candidate)) continue;
-
-      try {
-        if (statSync(`${plansDir}/${name}`).isDirectory() && !found.includes(name)) {
-          found.push(name);
-          break;
-        }
-      } catch {}
-    }
-
-  return found;
+  return (await detectAnswers(cwd, plansDir, quiet, io)).map(({ project }) => project);
 }
 
 export async function detectProject(
@@ -150,4 +215,16 @@ export async function detectProject(
   io: Io = processIo(),
 ): Promise<string | undefined> {
   return (await detectProjects(cwd, plansDir, quiet, io))[0];
+}
+
+export async function learnProject(
+  cwd: string,
+  plansDir: string,
+  io: Io = processIo(),
+): Promise<string | undefined> {
+  const [answer] = await detectAnswers(cwd, plansDir, true, io);
+  if (answer?.step === "main")
+    await gitRead(cwd, ["config", "--local", "--replace-all", PIN_KEY, answer.project], {}, io);
+
+  return answer?.project;
 }

@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { HEARTBEAT_EVERY_MS } from "skills-core/pulse";
 import { writeJsonAtomic } from "../io.ts";
 import { plansDir } from "../plans/paths.ts";
-import { checkoutOf, projectsNamed } from "../project.ts";
+import { answersAmong, checkoutOf, pinRead, projectDirectories } from "../project.ts";
 import { readSync } from "../read.ts";
 import { scrubGitEnv } from "./git-env.ts";
 import { sessionOf } from "./payload.ts";
@@ -37,6 +37,7 @@ function due(path: string, now: number): boolean {
 }
 
 function placeOf(cwd: string, root: string, env: NodeJS.ProcessEnv): Place | undefined {
+  const options = { cwd, env: scrubGitEnv(env), deadline: 2000 };
   const result = readSync(
     [
       "git",
@@ -47,7 +48,7 @@ function placeOf(cwd: string, root: string, env: NodeJS.ProcessEnv): Place | und
       "--symbolic-full-name",
       "HEAD",
     ],
-    { cwd, env: scrubGitEnv(env), deadline: 2000 },
+    options,
   );
 
   if (!result.ok || result.code !== 0) return undefined;
@@ -58,8 +59,10 @@ function placeOf(cwd: string, root: string, env: NodeJS.ProcessEnv): Place | und
   const branch = head.slice("refs/heads/".length);
   if (defaultBranches(common).includes(branch)) return undefined;
 
-  const [project] = projectsNamed(checkoutOf(top, common, cwd).candidates, root);
-  return project === undefined ? undefined : { project, branch };
+  const pin = readSync(["git", ...pinRead], options);
+  const checkout = checkoutOf(top, common, cwd, pin.ok && pin.code === 0 ? pin.stdout : undefined);
+  const [answer] = answersAmong(checkout.names, projectDirectories(root, checkout.names));
+  return answer && { project: answer.project, branch };
 }
 
 function defaultBranches(common: string): readonly string[] {

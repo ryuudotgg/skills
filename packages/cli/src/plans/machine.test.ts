@@ -24,6 +24,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { logicalPath } from "./machine.ts";
+import { fixtureGit } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 
 const repo = resolve(import.meta.dir, "../../../..");
@@ -283,11 +284,19 @@ describe("skills machine", () => {
     expect(refresh.stderr).toBe(`machine refresh: no plans directory at ${missing}\n`);
   });
 
-  test("plans start records the checkout it starts in", async () => {
+  test("plans start records the checkout it starts in and pins it to the project", async () => {
     await build("record");
 
     expect((await skills(["machine", "refresh"])).code).toBe(0);
     expect(await shown()).not.toContain("\ncheckout ");
+    expect(
+      await fixtureGit(join(dir, "a/Demo"), [
+        "config",
+        "--local",
+        "--get-all",
+        "skills.project",
+      ]).catch(() => ""),
+    ).toBe("");
 
     const start = await skills(["plans", "start", "Demo", "001"], {}, join(dir, "a/Demo"));
 
@@ -295,6 +304,10 @@ describe("skills machine", () => {
     expect(await shown()).toContain(
       `\ncheckout Demo ${join(dir, "a/Demo")} ${join(dir, "origin.git")}\n`,
     );
+
+    expect(
+      await fixtureGit(join(dir, "a/Demo"), ["config", "--local", "--get-all", "skills.project"]),
+    ).toBe("Demo\n");
   });
 
   test.each([

@@ -4,8 +4,14 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { readPlans } from "../plans/projection.ts";
 import { openStore } from "../plans/store.ts";
-import { detectProject } from "../project.ts";
-import { fixtureGit, writeFixture, storedRows } from "../test/fixtures.ts";
+import { checkoutIs, detectProject } from "../project.ts";
+import {
+  captureIo,
+  fixtureGit,
+  fixtureGitEnv,
+  storedRows,
+  writeFixture,
+} from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 
 const bin = resolve(import.meta.dir, "../../../../skills/playbook/bin/skills");
@@ -91,6 +97,15 @@ async function context(
 
 async function index(rows: string, project = "repo") {
   await writeFixture(plans, `${project}/index.tsv`, header + rows, "deleted");
+}
+
+async function pinOf(cwd: string): Promise<string> {
+  const read = await runCommand(["git", "config", "--local", "--get-all", "skills.project"], {
+    cwd,
+    env: fixtureGitEnv(),
+  });
+
+  return read.stdout;
 }
 
 describe("SessionBrief case ledger", () => {
@@ -354,6 +369,56 @@ describe("SessionBrief case ledger", () => {
 
     expect(await detectProject(outside, plans)).toBeUndefined();
     expect(await detectProject(repo, join(temporary, "missing"))).toBeUndefined();
+  });
+
+  test("a pin answers after a linked worktree's own folder name and before the main checkout's", async () => {
+    const worktree = join(temporary, "linked");
+    await fixtureGit(repo, ["worktree", "add", "-q", "-b", "linked", worktree]);
+    await index("", "repo");
+    await index("", "Pinned");
+    await fixtureGit(repo, ["config", "--local", "skills.project", "pinned"]);
+
+    expect(await detectProject(repo, plans)).toBe("Pinned");
+    expect(await detectProject(worktree, plans)).toBe("Pinned");
+
+    await index("", "Linked");
+    expect(await detectProject(worktree, plans)).toBe("Linked");
+
+    const env = { ...suiteEnvironment(), PLANS_DIR: plans };
+    expect(await checkoutIs(repo, "pinned", captureIo(env))).toBeUndefined();
+    expect(await checkoutIs(repo, "repo", captureIo(env))).toBe(
+      "this checkout is repo pinned to Pinned, not a checkout of repo",
+    );
+
+    await fixtureGit(repo, ["config", "--local", "skills.project", "Gone"]);
+    expect(await detectProject(repo, plans)).toBe("repo");
+    expect(await checkoutIs(repo, "repo", captureIo(env))).toBeUndefined();
+  });
+
+  test("the session start hook pins a checkout its main folder name resolved", async () => {
+    await index("001\tfirst\tDOING\tP1\tS\t-\t-\tmain\t2026-09-26\tnote\n", "Repo");
+    await writeFile(join(repo, ".git/config.lock"), "");
+
+    const locked = await context();
+    expect(await pinOf(repo)).toBe("");
+
+    await rm(join(repo, ".git/config.lock"));
+    expect(await context()).toBe(locked);
+    expect(await pinOf(repo)).toBe("Repo\n");
+  });
+
+  test("the session start hook writes no pin where the worktree's own folder resolved", async () => {
+    const worktree = join(temporary, "linked");
+    await fixtureGit(repo, ["worktree", "add", "-q", "-b", "linked", worktree]);
+    await index("", "Repo");
+    await index("", "Linked");
+
+    expect(await context(undefined, worktree)).toContain(`${plans}/Linked: 0 open.`);
+    expect(await pinOf(repo)).toBe("");
+
+    await rm(join(plans, "Linked"), { recursive: true });
+    expect(await context(undefined, worktree)).toContain(`${plans}/Repo: 0 open.`);
+    expect(await pinOf(worktree)).toBe("Repo\n");
   });
 
   test.skipIf(process.getuid?.() === 0)(

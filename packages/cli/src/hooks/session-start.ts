@@ -7,7 +7,7 @@ import { learnCheckout } from "../plans/machine.ts";
 import { plansDir as resolvePlansDir } from "../plans/index-tsv.ts";
 import { readStore, rowsOfProject } from "../plans/projection.ts";
 import { recentTrail, storedIssues, type Store } from "../plans/store.ts";
-import { detectProject, gitOutput } from "../project.ts";
+import { gitOutput, learnProject } from "../project.ts";
 import type { Context } from "../registry.ts";
 import { recordUpdate, sessionNotice } from "../update/notice.ts";
 import { machineLine } from "./machine-refresh.ts";
@@ -97,7 +97,7 @@ async function collect(lines: string[], ctx: Context): Promise<void> {
     gitOutput(process.cwd(), ["--no-optional-locks", "status", "--porcelain=v2", "--branch"], {
       quiet: true,
     }),
-    hasPlans ? detectProject(process.cwd(), plansDir, true) : Promise.resolve(undefined),
+    hasPlans ? learnProject(process.cwd(), plansDir) : Promise.resolve(undefined),
     hasPlans ? learnCheckout(plansDir).catch(() => undefined) : Promise.resolve(undefined),
   ]);
 

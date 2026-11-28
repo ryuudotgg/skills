@@ -1,6 +1,14 @@
 import { afterEach, expect, setDefaultTimeout, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -25,7 +33,8 @@ import {
   write,
 } from "../plans/store.ts";
 import { setSyncMeta } from "../plans/sync.ts";
-import { fixtureGit } from "../test/fixtures.ts";
+import { projectIndexes } from "../stack/layers.ts";
+import { captureIo, fixtureGit } from "../test/fixtures.ts";
 import { settleViews, type Views } from "../test/plans-views.ts";
 import { runCommand, suiteEnvironment } from "../test/process.ts";
 import { beat } from "./heartbeat.ts";
@@ -514,4 +523,43 @@ test("a row that leaves DOING before the write lock gets no heartbeat", async ()
 
   expect(raced).toBe(1);
   expect(heartbeats(fix.root)).toEqual([]);
+});
+
+test("a checkout pinned to its project beats and owns its stack under any folder name", async () => {
+  const fix = await fixture();
+  const moved = join(fix.home, "elsewhere");
+  renameSync(fix.repo, moved);
+
+  expect(await beat(payload(fix, "unpinned", moved), fix.env)).toBe("idle");
+  expect((await projectIndexes(undefined, captureIo(fix.env, moved))).owners).toEqual([]);
+
+  await fixtureGit(moved, ["config", "--local", "skills.project", "demo"]);
+
+  expect(await beat(payload(fix, "pinned", moved), fix.env)).toBe("written");
+  expect(heartbeats(fix.root)).toEqual([
+    { branch: "feat/beat", environment: null, session: "pinned" },
+  ]);
+
+  const db = new Database(join(fix.root, "plans.db"), { readonly: true });
+  try {
+    expect(db.query("SELECT project FROM events WHERE type = 'heartbeat'").all()).toEqual([
+      { project: "Demo" },
+    ]);
+  } finally {
+    db.close();
+  }
+
+  const { owners } = await projectIndexes(undefined, captureIo(fix.env, moved));
+  expect(owners?.map((index) => index.project)).toEqual(["Demo"]);
+});
+
+test("a pin naming a project with no index leaves the stack unowned, not the main folder's", async () => {
+  const fix = await fixture();
+  mkdirSync(join(fix.root, "Beta"));
+
+  expect((await projectIndexes(undefined, captureIo(fix.env, fix.repo))).owners).toHaveLength(1);
+
+  await fixtureGit(fix.repo, ["config", "--local", "skills.project", "beta"]);
+
+  expect((await projectIndexes(undefined, captureIo(fix.env, fix.repo))).owners).toEqual([]);
 });
