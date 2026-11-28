@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { MACHINE_EVENT, TOOLS, type Facts } from "skills-core";
 import { importStore } from "./plans/import.ts";
 import { appendEvent, openStore, write } from "./plans/store.ts";
-import { checkoutIs, detectProject, learnProject, repoKey } from "./project.ts";
+import { checkoutIs, detectProject, learnProject, pinOf, repoKey } from "./project.ts";
 import { captureIo, fixtureGit, fixtureGitEnv } from "./test/fixtures.ts";
 import { removeTemporary } from "./test/process.ts";
 
@@ -32,6 +32,25 @@ describe("repoKey", () => {
     "https://example.com/",
   ])("%s gives no key", (url) => {
     expect(repoKey(url)).toBeUndefined();
+  });
+});
+
+describe("pinOf", () => {
+  test("each value reads as its last, newlines in a value kept", () => {
+    const config = [
+      "skills.project\nOld",
+      "skills.repo\nexample.com/acme/old",
+      "skills.project\nDemo\nArchive",
+      "skills.repo\nexample.com/acme/demo",
+      "",
+    ].join("\0");
+
+    expect(pinOf(config)).toEqual({ name: "Demo\nArchive", key: "example.com/acme/demo" });
+  });
+
+  test("a pin key with no pin is no pin, a pin with an empty key has none", () => {
+    expect(pinOf("skills.repo\nexample.com/acme/demo\0")).toBeUndefined();
+    expect(pinOf("skills.project\nDemo\0skills.repo\n\0")).toEqual({ name: "Demo" });
   });
 });
 
@@ -114,6 +133,60 @@ describe("the remote rule", () => {
 
     expect(await learnProject(repo, plans, io())).toBe("Demo");
     expect(await fixtureGit(repo, ["config", "--local", "skills.project"])).toBe("Demo\n");
+    expect(await fixtureGit(repo, ["config", "--local", "skills.repo"])).toBe(
+      "example.com/acme/demo\n",
+    );
+  });
+
+  test("a pin with no pin key keeps answering in a checkout that has a key", async () => {
+    await project("Demo");
+    await fixtureGit(repo, ["config", "--local", "skills.project", "Demo"]);
+
+    expect(await detectProject(repo, plans, true, io())).toBe("Demo");
+    expect(await checkoutIs(repo, "Demo", io())).toBeUndefined();
+
+    expect(await learnProject(repo, plans, io())).toBe("Demo");
+    expect(await fixtureGit(repo, ["config", "--local", "skills.project"])).toBe("Demo\n");
+    expect(await fixtureGit(repo, ["config", "--local", "skills.repo"])).toBe(
+      "example.com/acme/demo\n",
+    );
+  });
+
+  test("a learn point rewrites a pin that no longer answers with the project another step resolved", async () => {
+    await project("Demo");
+    await project("Other");
+    await record({ Other: "git@example.com:acme/demo.git" });
+    await fixtureGit(repo, ["remote", "add", "fork", "https://example.com/acme/fork"]);
+
+    await fixtureGit(repo, ["config", "--local", "skills.project", "Demo"]);
+    await fixtureGit(repo, ["config", "--local", "skills.repo", "example.com/acme/gone"]);
+
+    expect(await learnProject(repo, plans, io())).toBe("Other");
+    expect(await fixtureGit(repo, ["config", "--local", "skills.project"])).toBe("Other\n");
+    expect(await fixtureGit(repo, ["config", "--local", "skills.repo"])).toBe(
+      "example.com/acme/demo\n",
+    );
+
+    expect(await detectProject(repo, plans, true, io())).toBe("Other");
+  });
+
+  test("a pin beside the key of another repository does not answer", async () => {
+    await project("Demo");
+    await fixtureGit(repo, ["config", "--local", "skills.project", "Demo"]);
+    await fixtureGit(repo, ["config", "--local", "skills.repo", "example.com/acme/other"]);
+
+    expect(await detectProject(repo, plans, true, io())).toBeUndefined();
+    expect(await checkoutIs(repo, "Demo", io())).toBe(
+      "this checkout is fresh, not a checkout of Demo",
+    );
+
+    expect(await learnProject(repo, plans, io())).toBeUndefined();
+    expect(await fixtureGit(repo, ["config", "--local", "skills.repo"])).toBe(
+      "example.com/acme/other\n",
+    );
+
+    await fixtureGit(repo, ["remote", "set-url", "origin", "git@example.com:Acme/Other.git"]);
+    expect(await detectProject(repo, plans, true, io())).toBe("Demo");
   });
 
   test("a recorded project name matches its directory in any letter case", async () => {

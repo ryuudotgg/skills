@@ -97,9 +97,18 @@ export function repoKey(url: string): string | undefined {
   return path ? `${parts.host}/${path}`.toLowerCase() : undefined;
 }
 
-const PIN_KEY = "skills.project";
+const PIN_NAME = "skills.project";
+const PIN_KEY = "skills.repo";
 
-export const pinRead = ["config", "--local", "--get", PIN_KEY] as const;
+export const pinRead = [
+  "config",
+  "--local",
+  "--null",
+  "--get-regexp",
+  "^skills\\.(project|repo)$",
+] as const;
+
+export type Pin = { name: string; key?: string };
 
 export type Step = "folder" | "pin" | "main" | "remote";
 
@@ -107,7 +116,7 @@ export type Name = { step: Step; name: string };
 
 export type Answer = { step: Step; project: string };
 
-export type Checkout = { inside: boolean; repo: string; names: Name[] };
+export type Checkout = { inside: boolean; repo: string; names: Name[]; pin?: Pin };
 
 export type ReadGit = (args: readonly string[]) => Promise<string | undefined>;
 
@@ -115,12 +124,27 @@ export function gitReader(cwd: string, io: Io = processIo()): ReadGit {
   return (args) => gitOutput(cwd, args, { quiet: true }, io);
 }
 
+export function pinOf(config: string | undefined): Pin | undefined {
+  const values = new Map<string, string>();
+  for (const entry of config?.split("\0") ?? []) {
+    const newline = entry.indexOf("\n");
+    values.set(
+      newline === -1 ? entry : entry.slice(0, newline),
+      newline === -1 ? "" : entry.slice(newline + 1),
+    );
+  }
+
+  const name = values.get(PIN_NAME);
+  const key = values.get(PIN_KEY);
+  return name ? { name, ...(key ? { key } : {}) } : undefined;
+}
+
 export async function readCheckout(
   cwd: string,
   quiet = false,
   io: Io = processIo(),
 ): Promise<Checkout> {
-  const [output, pin] = await Promise.all([
+  const [output, config] = await Promise.all([
     gitOutput(
       cwd,
       ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"],
@@ -131,14 +155,26 @@ export async function readCheckout(
   ]);
 
   const [top, common] = output?.split("\n") ?? [];
-  return checkoutOf(top, common, cwd, pin);
+  return checkoutAt(top, common, cwd, config, gitReader(cwd, io));
+}
+
+export async function checkoutAt(
+  top: string | undefined,
+  common: string | undefined,
+  cwd: string,
+  config: string | undefined,
+  readGit: ReadGit,
+): Promise<Checkout> {
+  const pin = pinOf(config);
+  const stands = !pin?.key || (await checkoutKeys(readGit)).includes(pin.key);
+  return checkoutOf(top, common, cwd, stands ? pin : undefined);
 }
 
 export function checkoutOf(
   top: string | undefined,
   common: string | undefined,
   cwd: string,
-  pin?: string,
+  pin?: Pin,
 ): Checkout {
   const repo = basename(top || cwd);
   if (!top) return { inside: false, repo, names: [{ step: "folder", name: repo }] };
@@ -149,14 +185,13 @@ export function checkoutOf(
       : basename(common).replace(/\.git$/, "")
     : "";
 
-  const pinned = pin?.replace(/\n$/, "");
   const names: Name[] = [
     ...(main && main !== repo ? [{ step: "folder" as const, name: repo }] : []),
-    ...(pinned ? [{ step: "pin" as const, name: pinned }] : []),
+    ...(pin ? [{ step: "pin" as const, name: pin.name }] : []),
     { step: "main", name: main || repo },
   ];
 
-  return { inside: true, repo, names };
+  return { inside: true, repo, names, ...(pin ? { pin } : {}) };
 }
 
 export function answersAmong(
@@ -207,13 +242,25 @@ export function projectDirectories(plansDir: string, names: readonly Name[]): st
   });
 }
 
-async function checkoutKeys(readGit: ReadGit): Promise<string[]> {
-  const remotes = (await readGit(["remote"]))?.split("\n").filter(Boolean) ?? [];
-  const urls = await Promise.all(remotes.map((remote) => readGit(["remote", "get-url", remote])));
-  if (urls.includes(undefined)) return [];
+type RemoteKey = { remote: string; key: string };
 
-  const keys = urls.flatMap((url) => repoKey(url!) ?? []);
-  return [...new Set(keys)];
+async function remoteKeys(readGit: ReadGit): Promise<RemoteKey[] | undefined> {
+  const listed = await readGit(["remote"]);
+  if (listed === undefined) return undefined;
+
+  const remotes = listed.split("\n").filter(Boolean);
+  const urls = await Promise.all(remotes.map((remote) => readGit(["remote", "get-url", remote])));
+  if (urls.includes(undefined)) return undefined;
+
+  return remotes.flatMap((remote, at) => {
+    const key = repoKey(urls[at]!);
+    return key ? [{ remote, key }] : [];
+  });
+}
+
+async function checkoutKeys(readGit: ReadGit): Promise<string[]> {
+  const keys = (await remoteKeys(readGit)) ?? [];
+  return [...new Set(keys.map(({ key }) => key))];
 }
 
 async function remoteAnswer(
@@ -324,9 +371,25 @@ export async function learnProject(
   plansDir: string,
   io: Io = processIo(),
 ): Promise<string | undefined> {
-  const [answer] = await detectAnswers(cwd, plansDir, true, io);
-  if (answer?.step === "main" || answer?.step === "remote")
-    await gitRead(cwd, ["config", "--local", "--replace-all", PIN_KEY, answer.project], {}, io);
+  const checkout = await readCheckout(cwd, true, io);
+  const readGit = gitReader(cwd, io);
+  const [answer] = await answersFor(checkout, plansDir, readGit);
+
+  const learned = answer?.step === "main" || answer?.step === "remote" ? answer.project : undefined;
+  const pins = checkout.names.filter(({ step }) => step === "pin");
+  const unkeyed = !checkout.pin?.key && projectDirectories(plansDir, pins).length > 0;
+  if (learned === undefined && !unkeyed) return answer?.project;
+
+  const keys = await remoteKeys(readGit);
+  if (keys === undefined) return answer?.project;
+
+  const key = (keys.find(({ remote }) => remote === "origin") ?? keys[0])?.key;
+  const config = (args: string[]) => gitRead(cwd, ["config", "--local", ...args], {}, io);
+  if (learned !== undefined) {
+    const pinned = await config(["--replace-all", PIN_NAME, learned]);
+    if (pinned.ok && pinned.code === 0)
+      await config(key ? ["--replace-all", PIN_KEY, key] : ["--unset-all", PIN_KEY]);
+  } else if (key) await config(["--replace-all", PIN_KEY, key]);
 
   return answer?.project;
 }

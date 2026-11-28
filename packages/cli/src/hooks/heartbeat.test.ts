@@ -553,6 +553,26 @@ test("a checkout pinned to its project beats and owns its stack under any folder
   expect(owners?.map((index) => index.project)).toEqual(["Demo"]);
 });
 
+test("a pin beside another repository's key beats only once the remotes point back", async () => {
+  const fix = await fixture();
+  const moved = join(fix.home, "elsewhere");
+  renameSync(fix.repo, moved);
+
+  await fixtureGit(moved, ["remote", "add", "origin", "https://example.com/acme/other"]);
+  await fixtureGit(moved, ["config", "--local", "skills.project", "demo"]);
+  await fixtureGit(moved, ["config", "--local", "skills.repo", "example.com/acme/demo"]);
+
+  expect(await beat(payload(fix, "copied", moved), fix.env)).toBe("idle");
+  expect(heartbeats(fix.root)).toEqual([]);
+
+  await fixtureGit(moved, ["remote", "set-url", "origin", "git@example.com:Acme/Demo.git"]);
+
+  expect(await beat(payload(fix, "restored", moved), fix.env)).toBe("written");
+  expect(heartbeats(fix.root)).toEqual([
+    { branch: "feat/beat", environment: null, session: "restored" },
+  ]);
+});
+
 test("a pin naming a project with no index leaves the stack unowned, not the main folder's", async () => {
   const fix = await fixture();
   mkdirSync(join(fix.root, "Beta"));
