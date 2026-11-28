@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync, renameSync, rmSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, realpath, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1300,6 +1301,40 @@ describe("the default store covers every checkout of the repository", () => {
       expect(windows.subagents.n).toBe(1);
       expect(windows.notes).toEqual([]);
     }
+  });
+
+  test("audit counts sessions recorded under another spelling of the checkout", async () => {
+    const recorded = join(root, "Repo");
+    const respelled = join(root, "repo");
+    const env = { ...suiteEnvironment(), HOME: home, GIT_CONFIG_GLOBAL: "/dev/null" };
+
+    expect((await runCommand(["git", "init", "--quiet", recorded], { cwd: root, env })).code).toBe(
+      0,
+    );
+
+    rmSync(join(home, ".claude/projects", encodedName(gone)), { recursive: true });
+    await writeSession(recorded);
+    renameSync(recorded, respelled);
+
+    const windows = await run(respelled);
+    expect(windows.found).toBe(existsSync(recorded) ? 1 : 0);
+  });
+
+  test("audit counts a removed worktree under another spelling", async () => {
+    const worktrees = join(home, ".t3/worktrees");
+    rmSync(join(home, ".claude/projects", encodedName(gone)), { recursive: true });
+    rmSync(join(worktrees, "repo"), { recursive: true, force: true });
+    await mkdir(join(worktrees, "Repo"));
+
+    const without = await run(main);
+    await writeSession(join(worktrees, "Repo/gone"));
+
+    const windows = await run(main);
+    expect(windows.found).toBe(without.found + (existsSync(join(worktrees, "repo")) ? 1 : 0));
+
+    rmSync(join(worktrees, "Repo"), { recursive: true });
+    const folds = existsSync(join(home, ".t3/WORKTREES"));
+    expect((await run(main)).found).toBe(without.found + (folds ? 1 : 0));
   });
 
   test("a Workflow agent counts as a subagent run, and its journal does not", async () => {
