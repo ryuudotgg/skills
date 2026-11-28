@@ -12,7 +12,10 @@ export type Relocation = {
 
 export type Place = { readonly row: Relocation; readonly place: string };
 
-export type RelocationRecord = { placesOf(directory: string): readonly Place[] };
+export type RelocationRecord = {
+  placesOf(directory: string): readonly Place[];
+  formerPathsOf(checkout: string): readonly string[];
+};
 
 function recordPath(plans: string): string {
   return join(plans, RELOCATIONS);
@@ -103,15 +106,20 @@ export function dropPending(plans: string, target: string): void {
 
 export function relocationRecord(plans: string): RelocationRecord {
   let settled: Relocation[] | undefined;
+  const settledRows = (): Relocation[] =>
+    (settled ??= readRelocations(plans)
+      .filter((row) => row.at !== null)
+      .sort((a, b) => (a.at ?? 0) - (b.at ?? 0)));
+
   return {
     placesOf(directory) {
-      settled ??= readRelocations(plans)
-        .filter((row) => row.at !== null)
-        .sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
-
-      return settled
+      return settledRows()
         .filter((row) => inside(directory, row.source) && existsSync(row.target))
         .map((row) => ({ row, place: placeUnder(directory, row.source, row.target) }));
+    },
+
+    formerPathsOf(checkout) {
+      return settledRows().flatMap((row) => (row.target === checkout ? row.source : []));
     },
   };
 }

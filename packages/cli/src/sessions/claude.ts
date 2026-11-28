@@ -22,7 +22,7 @@ export type Subagent = {
 
 export type SessionStore = {
   folders: readonly string[];
-  keeps: ((cwd: string) => boolean) | null;
+  keeps: ((cwd: string, folder: string) => boolean) | null;
 };
 
 export function encodedName(path: string): string {
@@ -42,16 +42,16 @@ function sessionFiles(
   cutoffMicros: number,
   notes: Notes,
 ): string[] {
-  const paths = store.folders.flatMap((folder) =>
-    recentFiles([folder, ...pattern], cutoffMicros, notes),
+  const found = store.folders.flatMap((folder) =>
+    recentFiles([folder, ...pattern], cutoffMicros, notes).map((path) => ({ folder, path })),
   );
 
   const keeps = store.keeps;
-  if (keeps === null) return paths;
+  if (keeps === null) return found.map(({ path }) => path);
 
-  return paths.filter((path) => {
+  return found.flatMap(({ folder, path }) => {
     const cwd = recordedCwd(path, notes);
-    return cwd !== null && keeps(cwd);
+    return cwd !== null && keeps(cwd, folder) ? [path] : [];
   });
 }
 
