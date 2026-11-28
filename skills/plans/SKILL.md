@@ -62,6 +62,7 @@ The backlog verbs and the two stack helpers run through the CLI at `<playbook>/b
 <playbook>/bin/skills plans start <Project> <id | ctx-slug>
 <playbook>/bin/skills plans close [--dry-run] <Project> <id> <DONE|DROPPED> <note> [--sha <sha> | --no-merge]
 <playbook>/bin/skills plans pin <Project> <id>... [--for <duration>]
+<playbook>/bin/skills plans bind <Project> | --clear
 <playbook>/bin/skills plans move <Project> <id> [--to <label | device id> | --file <path>]
 <playbook>/bin/skills plans adopt <Project> <id> [--file <path>]
 <playbook>/bin/skills machine show [--json]

@@ -23,7 +23,7 @@ import {
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { logicalPath } from "./machine.ts";
+import { logicalPath } from "./paths.ts";
 import { fixtureGit } from "../test/fixtures.ts";
 import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.ts";
 

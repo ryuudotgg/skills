@@ -447,6 +447,16 @@ export const plans: Area = {
       },
     },
     {
+      name: ["plans", "bind"],
+      allow: true,
+      usage: "skills plans bind <Project> | --clear",
+      grammar: ["bound <path> to <Project>", "unbound <path>"],
+      async run(args) {
+        const { bindVerb } = await import("../plans/bind.ts");
+        return bindVerb(args, this.usage, processIo());
+      },
+    },
+    {
       name: ["plans", "lease", "break"],
       allow: false,
       usage: "skills plans lease break <Project> <id>",

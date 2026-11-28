@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { basename, dirname, join, sep } from "node:path";
+import { basename, join } from "node:path";
 import {
   factsFrom,
   MACHINE_EVENT,
@@ -20,6 +20,7 @@ import { toolPath } from "./artifact-kinds.ts";
 import { openPlansStore } from "./commit.ts";
 import { Refusal } from "./import.ts";
 import { plansDir } from "./index-tsv.ts";
+import { logicalPath } from "./paths.ts";
 import { readStore } from "./projection.ts";
 import { appendEvent, metaValue, openStore, write, type Store } from "./store.ts";
 
@@ -117,24 +118,6 @@ async function probe(env: NodeJS.ProcessEnv): Promise<Probed> {
     arch: process.arch,
     tools: tools as Record<ToolName, Tool>,
   };
-}
-
-export function logicalPath(real: string, env: NodeJS.ProcessEnv, cwd: string): string {
-  const pwd = env.PWD;
-  try {
-    if (!pwd || realpathSync(pwd) !== realpathSync(cwd)) return real;
-  } catch {
-    return real;
-  }
-
-  for (let ancestor = pwd; dirname(ancestor) !== ancestor; ancestor = dirname(ancestor))
-    try {
-      const resolved = realpathSync(ancestor);
-      if (resolved !== ancestor && (real === resolved || real.startsWith(resolved + sep)))
-        return ancestor + real.slice(resolved.length);
-    } catch {}
-
-  return real;
 }
 
 export async function learnCheckout(
