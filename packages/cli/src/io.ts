@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 export type Io = {
@@ -50,4 +50,38 @@ export function writeJsonAtomic(path: string, value: unknown): void {
     rmSync(temporary, { force: true });
     throw error;
   }
+}
+
+function nearestExisting(path: string): string | undefined {
+  for (let at = path; ; at = dirname(at))
+    try {
+      lstatSync(at);
+      return at;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT" || dirname(at) === at)
+        return undefined;
+    }
+}
+
+function sameDirectory(one: string, other: string): boolean {
+  try {
+    const first = lstatSync(one, { bigint: true });
+    const second = lstatSync(other, { bigint: true });
+    return first.dev === second.dev && first.ino === second.ino && statSync(one).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+export function foldsCase(root: string): boolean {
+  const parts = nearestExisting(root)?.split("/") ?? [];
+  const last = parts.findLastIndex((part) => /[A-Za-z]/u.test(part));
+  if (last === -1) return false;
+
+  const respelled = parts[last]!.replace(/[A-Za-z]/gu, (letter) =>
+    letter === letter.toLowerCase() ? letter.toUpperCase() : letter.toLowerCase(),
+  );
+
+  const kept = parts.slice(0, last);
+  return sameDirectory([...kept, parts[last]].join("/"), [...kept, respelled].join("/"));
 }

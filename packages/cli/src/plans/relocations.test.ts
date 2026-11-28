@@ -1,5 +1,13 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LOG_HEADER } from "skills-core";
@@ -201,4 +209,41 @@ test("a record sees its target leave and come back between lookups", () => {
 
   mkdirSync(b);
   expect(record.placesOf(a).map((each) => each.place)).toEqual([b]);
+});
+
+test("a directory under another spelling of a row's source has its place where the disk folds case", () => {
+  const root = scratch();
+  const [repo, target] = paths(root, "Repo", "moved");
+  moved(root, repo, target, 1);
+  const folds = existsSync(join(root, "MOVED"));
+
+  const record = relocationRecord(root);
+  expect(record.placesOf(join(root, "repo/App")).map((each) => each.place)).toEqual(
+    folds ? [join(target, "App")] : [],
+  );
+
+  expect(record.formerPathsOf(join(root, "MOVED"))).toEqual(folds ? [repo] : []);
+  expect(record.formerPathsOf(target)).toEqual([repo]);
+});
+
+test("a case only move after an older row carries its target and drops no row", () => {
+  const root = scratch();
+  const [old, upper, lower] = paths(root, "old", "Repo", "repo");
+  moved(root, old, upper, 1);
+  moved(root, upper, lower, 2);
+
+  expect(readRelocations(root)).toEqual([
+    { source: old, target: lower, at: 1 },
+    { source: upper, target: lower, at: 2 },
+  ]);
+});
+
+test("only ASCII letters fold when a reader compares a row", () => {
+  const root = scratch();
+  const [source, target] = paths(root, "RÉPO", "MÖVED");
+  moved(root, source, target, 1);
+
+  const record = relocationRecord(root);
+  expect(record.placesOf(join(root, "RéPO/app"))).toEqual([]);
+  expect(record.formerPathsOf(join(root, "MöVED"))).toEqual([]);
 });
