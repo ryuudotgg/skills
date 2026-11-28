@@ -8,6 +8,7 @@ import { removeTemporary, runCommand, suiteEnvironment } from "../test/process.t
 import { editView, settleViews } from "../test/plans-views.ts";
 import { audit as auditCommand, casefold, type Result } from "./audit.ts";
 import { encodedName, transcriptEvent } from "../sessions/claude.ts";
+import { settleRelocation, writePending } from "../plans/relocations.ts";
 import { decodeGitPath, followUps, recordPublishing, type Publishing } from "./follow-ups.ts";
 import { implementationDelegate } from "./transcript.ts";
 
@@ -1398,6 +1399,116 @@ describe("the default store covers every checkout of the repository", () => {
     const windows = await run(join(root, "work/other"));
     expect(windows.found).toBe(1);
     expect(windows.subagents.n).toBe(1);
+  });
+
+  async function writeCarried(recorded: string, at: string, name: string): Promise<void> {
+    const folder = join(home, ".claude/projects", encodedName(at));
+    await mkdir(folder, { recursive: true });
+
+    const transcript = records(recorded, [
+      { type: "user", message: { role: "user", content: "/plans do 7" } },
+      { type: "assistant", message: { content: [{ type: "text", text: "reading" }] } },
+      { type: "assistant", message: { content: [{ type: "text", text: "writing" }] } },
+      { type: "assistant", message: { content: [{ type: "text", text: "done" }] } },
+    ]);
+
+    await writeFile(join(folder, `${name}.jsonl`), `${transcript}\n`);
+  }
+
+  async function writeCarriedAgent(recorded: string, at: string, name: string): Promise<void> {
+    const folder = join(home, ".claude/projects", encodedName(at), name, "subagents");
+    await mkdir(folder, { recursive: true });
+
+    const agent = { type: "assistant", agentType: "playbook-agent", message: { model: "m" } };
+    await writeFile(join(folder, "agent-1.jsonl"), records(recorded, [agent, agent]));
+  }
+
+  async function relocate(from: string, to: string, at: number): Promise<void> {
+    const plans = join(root, "plans");
+    await mkdir(plans, { recursive: true });
+    writePending(plans, [from], to);
+    settleRelocation(plans, to, at);
+  }
+
+  async function checkout(path: string): Promise<string> {
+    const env = { ...suiteEnvironment(), HOME: home, GIT_CONFIG_GLOBAL: "/dev/null" };
+    expect((await runCommand(["git", "init", "--quiet", path], { cwd: root, env })).code).toBe(0);
+    return path;
+  }
+
+  test("audit counts sessions recorded at a former path", async () => {
+    const target = await checkout(join(root, "new"));
+    const former = join(root, "old");
+    await writeCarried(former, target, "s1");
+
+    expect((await run(target)).found).toBe(0);
+
+    await relocate(former, target, 1);
+    expect((await run(target)).found).toBe(1);
+
+    await writeCarried(former, former, "s2");
+    expect((await run(target)).found).toBe(1);
+  });
+
+  test("audit counts a worktree made under a former name", async () => {
+    const target = await checkout(join(root, "new"));
+    await relocate(join(root, "old"), target, 1);
+
+    const without = await run(target);
+    const worktree = join(home, ".t3/worktrees/old/gone");
+    await writeCarried(worktree, worktree, "s1");
+
+    expect((await run(target)).found).toBe(without.found + 1);
+  });
+
+  test("audit counts carried sessions from each former path of a twice moved checkout", async () => {
+    const target = await checkout(join(root, "new"));
+    const first = join(root, "first");
+    const second = join(root, "second");
+    await writeCarried(join(first, "src"), join(target, "src"), "s1");
+    await writeCarried(second, target, "s2");
+
+    await relocate(first, second, 1);
+    await relocate(second, target, 2);
+
+    expect((await run(target)).found).toBe(2);
+  });
+
+  test("a former path's own folder stays unread when the new name is its prefix", async () => {
+    const target = await checkout(join(root, "demo"));
+    const former = join(root, "demo-old");
+
+    await writeCarried(former, target, "s1");
+    await writeCarried(former, former, "s2");
+    await writeCarried(join(former, "src"), join(former, "src"), "s3");
+    await writeCarried(join(target, "old-src"), join(target, "old-src"), "s4");
+
+    await relocate(former, target, 1);
+    expect((await run(target)).found).toBe(2);
+  });
+
+  test("a carried subagent run that recorded a subdirectory still counts", async () => {
+    const target = await checkout(join(root, "new"));
+    const former = join(root, "old");
+
+    await writeCarried(former, target, "s1");
+    await writeCarriedAgent(join(former, "src"), target, "s1");
+    await relocate(former, target, 1);
+
+    const windows = await run(target);
+    expect(windows.found).toBe(1);
+    expect(windows.subagents.n).toBe(1);
+  });
+
+  test("outside a git checkout a relocation adds no root", async () => {
+    const target = join(root, "plain");
+    await mkdir(target);
+    await relocate(join(root, "old"), target, 1);
+
+    const worktree = join(home, ".t3/worktrees/old/gone");
+    await writeCarried(worktree, worktree, "s1");
+
+    expect((await run(target)).found).toBe(0);
   });
 });
 

@@ -893,10 +893,11 @@ async function runAudit(parsed: Arguments, options: Options): Promise<Result | O
   const windowNotes: Notes = [];
   const codexNotes: Notes = [];
 
-  const tasks = await readTasks(plansDir(options.env), cutoff, taskNotes);
+  const plans = plansDir(options.env);
+  const tasks = await readTasks(plans, cutoff, taskNotes);
   const store: SessionStore =
     parsed.projectDir === undefined
-      ? repositoryStore(dirs.claude, home, options.cwd, options.env, windowNotes)
+      ? repositoryStore(dirs.claude, home, options.cwd, options.env, windowNotes, plans)
       : { folders: [parsed.projectDir], keeps: null };
 
   const metrics: Metrics[] = [];
