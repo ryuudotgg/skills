@@ -15,7 +15,8 @@ import { tombstone } from "../plans/outbox.ts";
 import { write, type Store } from "../plans/store.ts";
 import type { RemoteRecord } from "../plans/sync.ts";
 import { localLinks, sessionKey, sessionPolicies, type Policies } from "./policy.ts";
-import { mainFiles, newestSessions, originOf, sessionSecrets } from "./chunks.ts";
+import { relocationRecord, type RelocationRecord } from "../plans/relocations.ts";
+import { envReading, mainFiles, newestSessions, originOf, sessionSecrets } from "./chunks.ts";
 import { redact } from "./redact.ts";
 
 type Secrets = readonly string[];
@@ -103,29 +104,36 @@ function keyOf(payload: unknown): string {
   return sessionKey(host, session);
 }
 
-function secretsOf(store: Store, root: string): (key: string) => Secrets {
+function secretsOf(
+  store: Store,
+  root: string,
+  relocations: RelocationRecord,
+): (key: string) => Secrets {
   let files: ReturnType<typeof mainFiles> | undefined;
   let sessions: ReturnType<typeof newestSessions> | undefined;
   const known = new Map<string, Secrets>();
+  const reading = envReading(process.env, relocations);
   return (key) => {
     const found = known.get(key);
     if (found !== undefined) return found;
 
     files ??= mainFiles(root);
-    const origin = originOf(files.get(key)?.cwd ?? null, process.env);
-    const secrets = sessionSecrets(store.db, origin, () => {
+    const origin = originOf(files.get(key)?.cwd ?? null, reading);
+    const project = () => {
       sessions ??= newestSessions(store.db);
       return sessions.get(key)?.project ?? "-";
-    });
+    };
+
+    const secrets = sessionSecrets(store.db, origin, project, reading);
 
     known.set(key, secrets);
     return secrets;
   };
 }
 
-export function pushGate(store: Store, root: string): Gate {
+export function pushGate(store: Store, root: string, relocations = relocationRecord(root)): Gate {
   let policies: Policies | undefined;
-  const secrets = secretsOf(store, root);
+  const secrets = secretsOf(store, root, relocations);
   return {
     passes(record) {
       const gated = GATED[record.type];

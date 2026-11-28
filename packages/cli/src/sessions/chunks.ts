@@ -12,6 +12,7 @@ import {
   type TranscriptRecord,
 } from "skills-core";
 import { newestFacts } from "../plans/machine.ts";
+import { relocationRecord, type RelocationRecord } from "../plans/relocations.ts";
 import { appendEvent, locatorOf, sha256, write, type Store } from "../plans/store.ts";
 import { readSync } from "../read.ts";
 import { readBaselines, unresumed, type Baseline } from "./baseline.ts";
@@ -518,15 +519,41 @@ function headOf(path: string, size: number, late: () => boolean): string | undef
   }
 }
 
-export function originOf(cwd: string | null, env: NodeJS.ProcessEnv): Origin | undefined {
+export type EnvReading = {
+  readonly env: NodeJS.ProcessEnv;
+  readonly relocations: RelocationRecord;
+  readonly toplevels: Map<string, string>;
+};
+
+export function envReading(env: NodeJS.ProcessEnv, relocations: RelocationRecord): EnvReading {
+  return { env, relocations, toplevels: new Map() };
+}
+
+function toplevel(cwd: string, reading: EnvReading): string {
+  const known = reading.toplevels.get(cwd);
+  if (known !== undefined) return known;
+
+  const { env } = reading;
+  const listed = readSync(["git", "rev-parse", "--show-toplevel"], { cwd, env, deadline: 5_000 });
+  if (!listed.ok || listed.code !== 0) return cwd;
+
+  const found = listed.stdout.replace(/\n$/u, "") || cwd;
+  reading.toplevels.set(cwd, found);
+  return found;
+}
+
+function nearestSource(cwd: string, reading: EnvReading): string | undefined {
+  const sources = reading.relocations.placesOf(cwd).map((each) => each.row.source);
+  return sources.reduce<string | undefined>(
+    (best, source) => (best === undefined || source.length > best.length ? source : best),
+    undefined,
+  );
+}
+
+export function originOf(cwd: string | null, reading: EnvReading): Origin | undefined {
   if (cwd === null) return undefined;
-
-  const listed = existsSync(cwd)
-    ? readSync(["git", "rev-parse", "--show-toplevel"], { cwd, env, deadline: 5_000 })
-    : undefined;
-
-  const root = listed?.ok && listed.code === 0 ? listed.stdout.trim() || cwd : cwd;
-  return { cwd, root, home: env.HOME ?? "" };
+  const root = existsSync(cwd) ? toplevel(cwd, reading) : (nearestSource(cwd, reading) ?? cwd);
+  return { cwd, root, home: reading.env.HOME ?? "" };
 }
 
 function checkoutDirectories(db: Database, project: string): string[] {
@@ -540,13 +567,32 @@ function checkoutDirectories(db: Database, project: string): string[] {
   return path ? [path] : [];
 }
 
+function movedDirectories(
+  cwd: string | undefined,
+  checkout: string | undefined,
+  reading: EnvReading,
+): string[] {
+  const { relocations } = reading;
+  const held = cwd === undefined ? [] : relocations.placesOf(cwd);
+  const registered = checkout === undefined ? [] : relocations.placesOf(checkout);
+  const places = [...held, ...registered].sort((a, b) => (a.row.at ?? 0) - (b.row.at ?? 0));
+  return places.flatMap(({ place }) =>
+    existsSync(place) ? [place, toplevel(place, reading)] : [],
+  );
+}
+
 export function sessionSecrets(
   db: Database,
   origin: Origin | undefined,
   project: () => string,
+  reading: EnvReading,
 ): string[] {
   const live = origin !== undefined && existsSync(origin.cwd);
-  return envSecrets(live ? [origin.cwd, origin.root] : checkoutDirectories(db, project()));
+  const today = live ? [origin.cwd, origin.root] : checkoutDirectories(db, project());
+
+  const checkout = live ? undefined : today[0];
+  const moved = movedDirectories(origin?.cwd, checkout, reading);
+  return envSecrets([...new Set([...today, ...moved])]);
 }
 
 class Chunker {
@@ -559,7 +605,7 @@ class Chunker {
 
   constructor(
     readonly store: Store,
-    readonly env: NodeJS.ProcessEnv,
+    readonly reading: EnvReading,
     readonly limits: ChunkLimits,
   ) {}
 
@@ -595,8 +641,8 @@ class Chunker {
 
     const cursor = { ...position, digest: digestFor(this.store, source, resumed) };
 
-    const origin = originOf(source.cwd, this.env);
-    const secrets = sessionSecrets(this.store.db, origin, () => source.project);
+    const origin = originOf(source.cwd, this.reading);
+    const secrets = sessionSecrets(this.store.db, origin, () => source.project, this.reading);
     const upload = uploads(source.policy);
     const isIdle = () => Date.now() - info.mtimeMs >= IDLE_MS;
     const reach = {
@@ -762,8 +808,9 @@ export function chunkTranscripts(
   root: string,
   env: NodeJS.ProcessEnv,
   limits: ChunkLimits,
+  relocations = relocationRecord(root),
 ): Chunked {
-  const chunker = new Chunker(store, env, limits);
+  const chunker = new Chunker(store, envReading(env, relocations), limits);
   try {
     for (const source of sources(store, root)) chunker.run(source);
   } catch (error) {

@@ -12,6 +12,7 @@ import { Budget, Keys, wide, type Run } from "./run.ts";
 import { emptyReport, hubDeps, LONG_BUDGET, syncOnce } from "./sync.ts";
 import { acknowledged, stopped } from "../plans/outbox.ts";
 import { claimLocators, type PackKey } from "../plans/pack-locators.ts";
+import { relocationRecord } from "../plans/relocations.ts";
 import { readLocal } from "./vault.ts";
 
 export type Party = { readonly device: string; readonly label: string };
@@ -88,9 +89,11 @@ function pick(devices: readonly Party[], self: string, wanted: string): Target {
 }
 
 function runOf(deps: Deps, current: Enrolled): Run {
+  const root = dirname(deps.store.db.filename);
   return {
     deps,
-    root: dirname(deps.store.db.filename),
+    root,
+    relocations: relocationRecord(root),
     budget: new Budget(Number.POSITIVE_INFINITY),
     keys: new Keys(current.epochKeys),
     current,

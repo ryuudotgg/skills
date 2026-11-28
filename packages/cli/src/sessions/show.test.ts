@@ -8,6 +8,8 @@ import type { Io } from "../io.ts";
 import {
   blobText,
   envSources,
+  relocate,
+  relocatedSources,
   sessionsMachine,
   setPolicy,
   transcripts,
@@ -326,4 +328,42 @@ test("a removed worktree's session shows its branch with the env value redacted"
   const shown = await show(m, ["claude-fixture"]);
   expect(shown.out).not.toContain(value);
   expect(shown.out).toContain("\nbranch feat/[redacted:env]\n");
+});
+
+test("a relocated checkout's session shows its branch with the env value redacted", async () => {
+  const m = await machine();
+  const value = "Zq8vT3nW6pR1yK4mH2";
+  const { old } = await relocatedSources(m, `DEPLOY_KEY=${value}`);
+  relocate(m, old, join(m.root, "new/Alpha"));
+  write(m.store, () =>
+    appendEvent(m.store, {
+      kind: "stored",
+      type: SESSION_EVENT,
+      at: Date.now(),
+      project: "Alpha",
+      plan: "001",
+      payload: {
+        host: "claude",
+        session: "claude-fixture",
+        branch: `feat/${value}`,
+        plans: ["001"],
+        source: "resume",
+        started: "2026-11-07T10:05:00Z",
+      },
+    }),
+  );
+
+  const shown = await show(m, ["claude-fixture"]);
+  expect(shown.out).not.toContain(value);
+  expect(shown.out).toContain("\nbranch feat/[redacted:env]\n");
+});
+
+test("a relocated checkout with no relocations.tsv shows its digest as before", async () => {
+  const m = await machine();
+  const value = "Zq8vT3nW6pR1yK4mH2";
+  const { old } = await relocatedSources(m, `DEPLOY_KEY=${value}`);
+  appendFileSync(m.claude, prompt(`Deploy with key ${value}`));
+  renameSync(old, join(m.root, "new"));
+
+  expect(digestOf(m)).toContain(`Deploy with key ${value}`);
 });

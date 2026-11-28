@@ -14,6 +14,7 @@ import {
 } from "skills-core";
 import type { Skipped } from "../plans/files.ts";
 import type { Conflicted, Landed, Refused } from "../plans/landing.ts";
+import type { RelocationRecord } from "../plans/relocations.ts";
 import type { AuthoredEvent, RemoteRecord, Verifier } from "../plans/sync.ts";
 import { bytes } from "./base64.ts";
 import { HubRefusal } from "./client.ts";
@@ -412,6 +413,7 @@ export function clockOf(deps: Deps): Clock {
 export type Run = {
   readonly deps: Deps;
   readonly root: string;
+  readonly relocations: RelocationRecord;
   readonly budget: Budget;
   keys: Keys;
   current: Enrolled;

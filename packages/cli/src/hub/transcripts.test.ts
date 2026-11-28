@@ -1,4 +1,6 @@
 import { afterEach, expect, setDefaultTimeout, test } from "bun:test";
+import { spyOn } from "bun:test";
+import * as fs from "node:fs";
 import { Database } from "bun:sqlite";
 import { appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -16,6 +18,7 @@ import {
   transcripts,
   type SessionsMachine,
 } from "../test/sessions-fixture.ts";
+import { relocate, relocatedSources } from "../test/sessions-fixture.ts";
 import { connect } from "./client.ts";
 import {
   enrolled as current,
@@ -325,4 +328,26 @@ test("a joined machine fetches another machine's chunk blobs, and fetches a drop
   b.store.db.run("DELETE FROM blobs WHERE sha256 = ?", [chunk.sha256]);
   await sync(b, fixture.url);
   expect(blobText(b.store, chunk.sha256)).toContain("only on A");
+});
+
+test("a relocated checkout's sync reads relocations.tsv once and redacts the moved env value", async () => {
+  const fixture = await hub();
+  const m = await enrolled(fixture);
+  const value = "Zq8vT3nW6pR1yK4mH2";
+  const { old } = await relocatedSources(m, `DEPLOY_KEY=${value}`);
+  relocate(m, old, join(m.root, "new/Alpha"));
+
+  appendFileSync(m.claude, `{"type":"user","message":{"content":"deploy with ${value}"}}\n`);
+  age(m.claude);
+
+  const read = spyOn(fs, "readFileSync");
+  cleanup.push(() => read.mockRestore());
+  await sync(m, fixture.url);
+
+  const reads = read.mock.calls.filter(([path]) => String(path).endsWith("relocations.tsv"));
+  expect(reads).toHaveLength(1);
+
+  const [only] = transcripts(m.store);
+  expect(blobText(m.store, only?.sha256 ?? "")).toContain("deploy with [redacted:env]");
+  expect(blobText(m.store, only?.digest ?? "").includes(value)).toBe(false);
 });

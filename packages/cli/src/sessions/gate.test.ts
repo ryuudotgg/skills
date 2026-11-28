@@ -1,9 +1,12 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
+import { renameSync } from "node:fs";
 import { join } from "node:path";
 import type { RemoteRecord } from "../plans/sync.ts";
 import { envSources, sessionsMachine } from "../test/sessions-fixture.ts";
+import { relocate, relocatedSources } from "../test/sessions-fixture.ts";
+import { relocationRecord } from "../plans/relocations.ts";
 import { appendEvent, write } from "../plans/store.ts";
 import { authorDeletions, pushGate } from "./gate.ts";
 
@@ -360,4 +363,80 @@ test("a live worktree's env values win over its registered checkout's", async ()
 
   rmSync(worktree, { recursive: true });
   expect(branch()).toBe(`feat/${worktreeValue}/[redacted:env]`);
+});
+
+test("a relocated checkout's session branch leaves with its env value redacted", async () => {
+  const m = await sessionsMachine();
+  cleanup.push(m.close);
+
+  const value = "Zq8vT3nW6pR1yK4mH2";
+  const { old } = await relocatedSources(m, `DEPLOY_KEY=${value}`);
+  relocate(m, old, join(m.root, "new/Alpha"));
+
+  const record = {
+    type: "session",
+    payload: {
+      host: "claude",
+      session: "claude-fixture",
+      branch: `feat/${value}`,
+      plans: ["001"],
+      source: "resume",
+      started: "2026-11-07T10:05:00Z",
+    },
+  } as unknown as RemoteRecord;
+
+  const sent = pushGate(m.store, m.plans).outgoing(record).payload as { branch: string };
+  expect(sent.branch).toBe("feat/[redacted:env]");
+});
+
+test("a relocated checkout with no relocations.tsv leaves its branch as before", async () => {
+  const m = await sessionsMachine();
+  cleanup.push(m.close);
+
+  const value = "Zq8vT3nW6pR1yK4mH2";
+  const { old } = await relocatedSources(m, `DEPLOY_KEY=${value}`);
+  renameSync(old, join(m.root, "new"));
+
+  const record = {
+    type: "session",
+    payload: {
+      host: "claude",
+      session: "claude-fixture",
+      branch: `feat/${value}`,
+      plans: ["001"],
+      source: "resume",
+      started: "2026-11-07T10:05:00Z",
+    },
+  } as unknown as RemoteRecord;
+
+  const sent = pushGate(m.store, m.plans).outgoing(record).payload as { branch: string };
+  expect(sent.branch).toBe(`feat/${value}`);
+});
+
+test("a relocated checkout's gate reads the relocation record it is given", async () => {
+  const m = await sessionsMachine();
+  cleanup.push(m.close);
+
+  const value = "Zq8vT3nW6pR1yK4mH2";
+  const { old } = await relocatedSources(m, `DEPLOY_KEY=${value}`);
+  const given = relocationRecord(m.plans);
+  relocate(m, old, join(m.root, "new/Alpha"));
+
+  given.placesOf(old);
+  rmSync(join(m.plans, "relocations.tsv"));
+
+  const record = {
+    type: "session",
+    payload: {
+      host: "claude",
+      session: "claude-fixture",
+      branch: `feat/${value}`,
+      plans: ["001"],
+      source: "resume",
+      started: "2026-11-07T10:05:00Z",
+    },
+  } as unknown as RemoteRecord;
+
+  const sent = pushGate(m.store, m.plans, given).outgoing(record).payload as { branch: string };
+  expect(sent.branch).toBe("feat/[redacted:env]");
 });

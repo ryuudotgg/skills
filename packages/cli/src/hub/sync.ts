@@ -14,6 +14,7 @@ import {
 import { tryLock } from "../lock.ts";
 import { MISSING, type Tailnet } from "./tailscale.ts";
 import { Refusal } from "../plans/import.ts";
+import { relocationRecord } from "../plans/relocations.ts";
 import { chunkTranscripts, forgetDigests, uncutBytes } from "../sessions/chunks.ts";
 import { authorDeletions, GATED_TYPES, pushGate } from "../sessions/gate.ts";
 import { scanSessions } from "../sessions/scan.ts";
@@ -163,7 +164,7 @@ function wire(event: AuthoredEvent) {
 
 function gatedBatch(run: Run): ReturnType<typeof unsealed> {
   const { store } = run.deps;
-  const gate = pushGate(store, run.root);
+  const gate = pushGate(store, run.root, run.relocations);
 
   for (;;) {
     const batch = unsealed(store, run.current.device, BATCH);
@@ -189,7 +190,7 @@ function gatedBatch(run: Run): ReturnType<typeof unsealed> {
 async function regate(run: Run): Promise<void> {
   const { store } = run.deps;
   const { device } = run.current;
-  const gate = pushGate(store, run.root);
+  const gate = pushGate(store, run.root, run.relocations);
   const failing = sealedRecords(store, device, GATED_TYPES).filter(
     (record) => !gate.passes(record),
   );
@@ -491,9 +492,11 @@ async function start(deps: Deps, url: string, ms: number, grace?: number): Promi
 
   if (isHeld(held(store), current.device)) release(store, current.device);
 
+  const root = rootOf(store);
   return {
     deps,
-    root: rootOf(store),
+    root,
+    relocations: relocationRecord(root),
     budget,
     keys: new Keys(current.epochKeys),
     current,
@@ -512,14 +515,16 @@ async function recordSessions(run: Run, env: NodeJS.ProcessEnv, cap: number): Pr
   const { budget } = run;
   const known = budget.bandwidth !== undefined;
   const bandwidth = budget.bandwidth ?? 0;
-  const chunked = chunkTranscripts(run.deps.store, run.root, env, {
+  const limits = {
     deadline: run.budget.share(1 / 3),
     now,
     bytes: cap,
     room: known ? () => ((budget.pushable() ?? 0) * 3) / 4 : undefined,
     perChunk: (bandwidth * budget.roundTrip) / 4,
     chunks: known ? undefined : 1,
-  });
+  };
+
+  const chunked = chunkTranscripts(run.deps.store, run.root, env, limits, run.relocations);
 
   const { refused } = chunked;
   if (refused !== undefined && chunked.made === 0)
