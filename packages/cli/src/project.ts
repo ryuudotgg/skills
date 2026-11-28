@@ -438,7 +438,8 @@ export async function learnProject(
   if (keys === undefined) return answer?.project;
 
   const key = pinKeyOf(keys);
-  if (learned !== undefined) await writePin(cwd, key ? { name: learned, key } : { name: learned }, io);
+  if (learned !== undefined)
+    await writePin(cwd, key ? { name: learned, key } : { name: learned }, io);
   else if (key) await writeConfig(cwd, [["--replace-all", PIN_KEY, key]], io);
 
   return answer?.project;
