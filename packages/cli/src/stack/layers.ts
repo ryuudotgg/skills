@@ -3,11 +3,11 @@ import type { Io } from "../io.ts";
 import { indexPath, missingIndex, plansDir } from "../plans/index-tsv.ts";
 import type { PlansIndex } from "../plans/projection.ts";
 import {
-  answersAmong,
+  answersFor,
   asciiLower,
   checkoutIs,
   defaultBranch,
-  projectDirectories,
+  gitReader,
   readCheckout,
 } from "../project.ts";
 import {
@@ -43,11 +43,11 @@ type Indexes = { indexes: PlansIndex[]; owners?: PlansIndex[] };
 export async function projectIndexes(project: string | undefined, io: Io): Promise<Indexes> {
   if (project === undefined) {
     const indexes = await readPlans(io.env);
-    const { names } = await readCheckout(io.cwd, false, io);
-    const [answer] = answersAmong(
-      names,
+    const [answer] = await answersFor(
+      await readCheckout(io.cwd, false, io),
+      plansDir(io.env),
+      gitReader(io.cwd, io),
       indexes.map((index) => index.project),
-      projectDirectories(plansDir(io.env), names),
     );
 
     const owner = indexes.find((index) => index.project === answer?.project);

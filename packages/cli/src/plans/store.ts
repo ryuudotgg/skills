@@ -433,11 +433,18 @@ export type FeedPage =
   | { kind: "events"; events: FeedEvent[]; generation: number }
   | { kind: "unknown" };
 
-export function openReadOnly(path: string): Database {
+export function openReadOnly(path: string, busyMs = 2000): Database {
   const db = new Database(path, { readonly: true, strict: true });
-  db.run("PRAGMA busy_timeout = 2000");
 
-  const version = schemaVersion(db);
+  let version: number;
+  try {
+    db.run(`PRAGMA busy_timeout = ${busyMs}`);
+    version = schemaVersion(db);
+  } catch (error) {
+    db.close();
+    throw error;
+  }
+
   if (version === MIGRATIONS.length) return db;
 
   db.close();

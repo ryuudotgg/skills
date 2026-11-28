@@ -62,17 +62,58 @@ export function asciiLower(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 
+function hostAndPath(url: string): { host: string; path: string } | undefined {
+  const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(url);
+  if (scheme) {
+    if (asciiLower(scheme[1]!) === "file") return undefined;
+
+    const rest = url.slice(scheme[0].length);
+    const slash = rest.search(/[/?#]/);
+    const authority = slash === -1 ? rest : rest.slice(0, slash);
+    const host = authority.slice(authority.lastIndexOf("@") + 1).replace(/:\d*$/, "");
+    return { host, path: slash === -1 ? "" : rest.slice(slash) };
+  }
+
+  const bracketed = /^([^/@]*@)?\[[^\]/]*\]:/.exec(url);
+  const colon = bracketed ? bracketed[0].length - 1 : url.indexOf(":");
+  const slash = url.indexOf("/");
+  if (colon <= 0 || (slash !== -1 && slash < colon)) return undefined;
+
+  const authority = url.slice(0, colon);
+  return { host: authority.slice(authority.lastIndexOf("@") + 1), path: url.slice(colon + 1) };
+}
+
+export function repoKey(url: string): string | undefined {
+  const parts = hostAndPath(url.trim().replace(/^[a-z][a-z0-9+.-]*::/i, ""));
+  if (!parts?.host) return undefined;
+
+  const path = parts.path
+    .replace(/[?#].*$/s, "")
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "")
+    .replace(/\/+$/, "")
+    .replace(/^\/+/, "");
+
+  return path ? `${parts.host}/${path}`.toLowerCase() : undefined;
+}
+
 const PIN_KEY = "skills.project";
 
 export const pinRead = ["config", "--local", "--get", PIN_KEY] as const;
 
-export type Step = "folder" | "pin" | "main";
+export type Step = "folder" | "pin" | "main" | "remote";
 
 export type Name = { step: Step; name: string };
 
 export type Answer = { step: Step; project: string };
 
-type Checkout = { inside: boolean; repo: string; names: Name[] };
+export type Checkout = { inside: boolean; repo: string; names: Name[] };
+
+export type ReadGit = (args: readonly string[]) => Promise<string | undefined>;
+
+export function gitReader(cwd: string, io: Io = processIo()): ReadGit {
+  return (args) => gitOutput(cwd, args, { quiet: true }, io);
+}
 
 export async function readCheckout(
   cwd: string,
@@ -166,6 +207,65 @@ export function projectDirectories(plansDir: string, names: readonly Name[]): st
   });
 }
 
+async function checkoutKeys(readGit: ReadGit): Promise<string[]> {
+  const remotes = (await readGit(["remote"]))?.split("\n").filter(Boolean) ?? [];
+  const urls = await Promise.all(remotes.map((remote) => readGit(["remote", "get-url", remote])));
+  if (urls.includes(undefined)) return [];
+
+  const keys = urls.flatMap((url) => repoKey(url!) ?? []);
+  return [...new Set(keys)];
+}
+
+async function remoteAnswer(
+  keys: readonly string[],
+  plansDir: string,
+  projects?: readonly string[],
+): Promise<Answer | undefined> {
+  if (keys.length === 0) return undefined;
+
+  const { recordedOrigins } = await import("./plans/origins.ts");
+  const names: Name[] = recordedOrigins(plansDir)
+    .filter(({ origin }) => {
+      const key = repoKey(origin);
+      return key !== undefined && keys.includes(key);
+    })
+    .map(({ project }) => ({ step: "remote", name: project }));
+
+  if (names.length === 0) return undefined;
+
+  const sorted = [...(projects ?? projectDirectories(plansDir, names))].sort();
+  const matched = new Set(
+    names.flatMap(
+      ({ name }) =>
+        sorted.find((project) => project === name) ??
+        sorted.find((project) => asciiLower(project) === asciiLower(name)) ??
+        [],
+    ),
+  );
+
+  const [project] = matched;
+  return matched.size === 1 ? { step: "remote", project: project! } : undefined;
+}
+
+export async function answersFor(
+  checkout: Checkout,
+  plansDir: string,
+  readGit: ReadGit,
+  projects?: readonly string[],
+): Promise<Answer[]> {
+  const directories = projectDirectories(plansDir, checkout.names);
+  const found = answersAmong(checkout.names, projects ?? directories, directories);
+  const pinned = checkout.names.some(
+    ({ step, name }) =>
+      step === "pin" && directories.some((directory) => asciiLower(directory) === asciiLower(name)),
+  );
+
+  if (found.length > 0 || pinned || !checkout.inside) return found;
+
+  const remote = await remoteAnswer(await checkoutKeys(readGit), plansDir, projects);
+  return remote ? [remote] : [];
+}
+
 export async function checkoutIs(
   cwd: string,
   project: string,
@@ -185,6 +285,9 @@ export async function checkoutIs(
 
   if (passes) return undefined;
 
+  const [answer] = await answersFor(checkout, plansDir(io.env), gitReader(cwd, io));
+  if (answer?.step === "remote" && asciiLower(answer.project) === wanted) return undefined;
+
   const pinned = pin === undefined ? "" : ` pinned to ${pin}`;
   return `this checkout is ${checkout.repo}${pinned}, not a checkout of ${project}`;
 }
@@ -195,8 +298,7 @@ async function detectAnswers(
   quiet = false,
   io: Io = processIo(),
 ): Promise<Answer[]> {
-  const { names } = await readCheckout(cwd, quiet, io);
-  return answersAmong(names, projectDirectories(plansDir, names));
+  return answersFor(await readCheckout(cwd, quiet, io), plansDir, gitReader(cwd, io));
 }
 
 export async function detectProjects(
@@ -223,7 +325,7 @@ export async function learnProject(
   io: Io = processIo(),
 ): Promise<string | undefined> {
   const [answer] = await detectAnswers(cwd, plansDir, true, io);
-  if (answer?.step === "main")
+  if (answer?.step === "main" || answer?.step === "remote")
     await gitRead(cwd, ["config", "--local", "--replace-all", PIN_KEY, answer.project], {}, io);
 
   return answer?.project;
