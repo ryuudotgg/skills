@@ -51,7 +51,7 @@ The Task `model` enum is closed: `sonnet`, `opus`, `fable`, `inherit`, plus a ch
 
 ## Backlog
 
-Plans live in the plans directory: `$PLANS_DIR` if set, otherwise `~/Plans`. Below, `$PLANS` stands for that directory. Projects are whatever directories exist under it, discovered at runtime, or inferred from the current repository name.
+Plans live in the plans directory: `$PLANS_DIR` if set, otherwise `~/Plans`. Below, `$PLANS` stands for that directory. Projects are whatever directories exist under it, discovered at runtime. Which one a checkout belongs to is decided as the Project detection section of the plans skill says.
 
 - `$PLANS/plans.db`: the store, one SQLite file per machine holding every row and trail event.
 - `$PLANS/log.tsv`: global append only trail, a view the store writes.

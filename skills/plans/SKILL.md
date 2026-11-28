@@ -12,7 +12,7 @@ Every path below lives under the plans directory: `${PLANS_DIR:-$HOME/Plans}`, w
 
 ## Rules that override everything below
 
-- Who stages, commits, pushes and posts is stated once, in the playbook skill's `references/delivery.md`. The `/plans do` ending and `/plans review` below follow the mode. Outside those two verbs this skill only reads code, writes files under `<plans>`, creates local branches, records each one's base in git config, and fetches the remote default branch, except that the sweep, which `/plans close` with no id and `/plans wave` both run, also removes the scratch and the checkouts its helpers free.
+- Who stages, commits, pushes and posts is stated once, in the playbook skill's `references/delivery.md`. The `/plans do` ending and `/plans review` below follow the mode. Outside those two verbs this skill only reads code, writes files under `<plans>`, creates local branches, records each one's base in git config, pins a checkout as Project detection says, and fetches the remote default branch, except that the sweep, which `/plans close` with no id and `/plans wave` both run, also removes the scratch and the checkouts its helpers free.
 - No worktrees, ever. Scratch space is `/tmp/plans-<id>/`. Never pass an isolation parameter to any tool, in any form: `isolation: "remote"` silently downgrades to a worktree. The one exception is the checkout `t3_thread_launch` creates for a thread `/plans wave` starts: the harness makes and binds it before the thread runs, no agent runs git to make it, and the plan thread working in it keeps this rule.
 - Ambiguity about where something lands (which surface, which tab, public or private, who can see it) is a blocking question. It is never a default, never inferred from the nearest plausible directory, never settled by a prototype. This is the named override of the never block on the human principle: on destination, you block.
 - Writes to production data need an approved plan first. That covers any script handed to the operator to run against prod, and any MCP tool that mutates production state (bans, deletions, merges, bulk notifications, access grants). Read only queries and searches do not.
@@ -25,7 +25,14 @@ Every path below lives under the plans directory: `${PLANS_DIR:-$HOME/Plans}`, w
 
 Projects are the directories under `<plans>`, discovered at runtime. There is no known list.
 
-Match the git toplevel basename against those directory names case insensitively. If it does not match, try the main checkout's name from git's common directory, so a linked worktree resolves even when its folder has another name. Outside a repo, use the basename of `$PWD` as the only candidate. The first match wins, using the directory's own casing. No match means ask which project. Never guess, and never create a new project directory without being told to. The CLI keeps this rule. `plans frontier` with no argument detects through it, and `plans handoff`, `plans stack-base` and `plans below` refuse when run from a checkout of another project. The session start hook uses the same TypeScript code.
+Inside a git repository four steps run in order and the first that answers wins. A name answers when it matches one of those directory names case insensitively, and the match takes the directory's own casing.
+
+1. The toplevel folder name, the basename of `git rev-parse --show-toplevel`, answers first when it is not the main checkout's name, as in a linked worktree whose folder has a name of its own.
+2. The pin, `skills.project` in the checkout's local git config, answers next when it names a project directory and, if `skills.repo` holds the repo key it was written for, the checkout still has a remote with that key.
+3. The main checkout's name, from git's common directory, answers when no pin does, so a linked worktree resolves even when its folder has another name.
+4. The remote rule answers last, when the origins machine facts record that share a repo key with one of the checkout's remotes name exactly one project directory.
+
+Outside a repo, use the basename of `$PWD` as the only candidate. No match means ask which project. Never guess, and never create a new project directory without being told to. Once the operator names an existing project for a git checkout no step resolved, run `<playbook>/bin/skills plans bind <Project>` in that checkout, so its later sessions resolve through the pin, which the main checkout and its linked worktrees share. That answer is the one reason to bind unasked, never a refusal you want gone. The CLI keeps this rule. `plans frontier` with no argument detects through it, and `plans handoff`, `plans stack-base` and `plans below` refuse when run from a checkout of another project. The session start hook uses the same TypeScript code.
 
 ## Layout
 
